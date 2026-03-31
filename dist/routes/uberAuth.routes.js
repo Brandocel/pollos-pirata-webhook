@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const uberAuth_controller_1 = require("../controllers/uberAuth.controller");
+const router = (0, express_1.Router)();
+router.get("/auth/login", uberAuth_controller_1.startUberLogin);
+router.get("/auth/callback", uberAuth_controller_1.handleUberAuthCallback);
+router.get("/session", uberAuth_controller_1.getMerchantSessionInfo);
+router.get("/stores", uberAuth_controller_1.getMerchantStores);
+router.post("/stores/:storeId/activate", uberAuth_controller_1.activateMerchantStore);
+exports.default = router;
