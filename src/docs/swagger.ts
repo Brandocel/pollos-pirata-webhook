@@ -1,6 +1,19 @@
 import { Express } from "express";
 import swaggerUi from "swagger-ui-express";
 
+function getServerUrl(): string {
+  const port = Number(process.env.PORT || 3000);
+
+  return (
+    process.env.RENDER_EXTERNAL_URL ||
+    process.env.APP_URL ||
+    `http://localhost:${port}`
+  );
+}
+
+const serverUrl = getServerUrl();
+const isProduction = process.env.NODE_ENV === "production";
+
 const swaggerDocument = {
   openapi: "3.0.3",
   info: {
@@ -11,8 +24,8 @@ const swaggerDocument = {
   },
   servers: [
     {
-      url: "http://localhost:3000",
-      description: "Servidor local"
+      url: serverUrl,
+      description: isProduction ? "Servidor Render" : "Servidor local"
     }
   ],
   tags: [
