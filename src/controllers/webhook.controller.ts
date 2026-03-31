@@ -13,6 +13,20 @@ function safeJsonParse<T>(rawBody: Buffer): T {
   return JSON.parse(rawBody.toString("utf8")) as T;
 }
 
+function getSingleString(value: unknown): string | null {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  if (Array.isArray(value)) {
+    const firstString = value.find((item) => typeof item === "string" && item.trim().length > 0);
+    return typeof firstString === "string" ? firstString.trim() : null;
+  }
+
+  return null;
+}
+
 function formatMoney(formatted?: string, amount?: number, currency?: string): string {
   if (formatted) return formatted;
   if (typeof amount === "number") return `${(amount / 100).toFixed(2)} ${currency ?? ""}`.trim();
@@ -184,20 +198,14 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
         return;
       }
 
-      const orderId = payload.meta?.resource_id;
+      const orderId = getSingleString(payload.meta?.resource_id);
 
       if (!orderId) {
-        console.error(chalk.red("El webhook no contiene meta.resource_id"));
+        console.error(chalk.red("El webhook no contiene meta.resource_id válido"));
         return;
       }
 
       const uberApiService = getUberApiService();
-      if (Array.isArray(orderId)) {
-        throw new Error("Invalid orderId: expected a string but received an array");
-      }
-      if (typeof orderId !== "string") {
-        throw new Error("Invalid orderId: expected a string but received an array");
-      }
       const order = await uberApiService.getOrderDetails(orderId);
 
       printOrderSummary(order);
@@ -225,12 +233,12 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
 
 export async function getOrderDetailsManually(req: Request, res: Response): Promise<void> {
   try {
-    const { orderId } = req.params;
+    const orderId = getSingleString(req.params.orderId);
 
     if (!orderId) {
       res.status(400).json({
         ok: false,
-        message: "Falta el orderId"
+        message: "Falta el orderId o no es válido"
       });
       return;
     }
@@ -248,6 +256,8 @@ export async function getOrderDetailsManually(req: Request, res: Response): Prom
 
     if (error instanceof Error) {
       console.error(chalk.red(error.message));
+    } else {
+      console.error(chalk.red("Error desconocido"));
     }
 
     res.status(500).json({
