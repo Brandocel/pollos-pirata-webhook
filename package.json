@@ -1,0 +1,39 @@
+{
+  "name": "pollos-pirata-uber-eats",
+  "version": "1.0.0",
+  "description": "Integración Uber Eats Marketplace API para Pollos Pirata",
+  "main": "dist/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "check": "tsc --noEmit"
+  },
+  "keywords": [
+    "uber-eats",
+    "webhook",
+    "express",
+    "typescript",
+    "pollos-pirata"
+  ],
+  "author": "Pollos Pirata",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "axios": "^1.8.4",
+    "chalk": "^5.3.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.10",
+    "@types/swagger-ui-express": "^4.1.8",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
