@@ -15,6 +15,7 @@ if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
 
 function base64UrlEncode(value: Buffer | string): string {
   const buffer = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
+
   return buffer
     .toString("base64")
     .replace(/\+/g, "-")
@@ -24,8 +25,9 @@ function base64UrlEncode(value: Buffer | string): string {
 
 function base64UrlDecode(value: string): Buffer {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padding = 4 - (normalized.length % 4 || 4);
-  return Buffer.from(normalized + "=".repeat(padding % 4), "base64");
+  const padding = (4 - (normalized.length % 4)) % 4;
+
+  return Buffer.from(normalized + "=".repeat(padding), "base64");
 }
 
 function getKey(): Buffer {

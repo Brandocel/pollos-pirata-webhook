@@ -38,24 +38,20 @@ function getSessionFromRequest(req: Request): MerchantSessionPayload | null {
 export async function startUberLogin(req: Request, res: Response): Promise<void> {
   try {
     const activationService = getUberActivationService();
-
-    const appRedirectUri =
-      typeof req.query.app_redirect_uri === "string" && req.query.app_redirect_uri.trim().length > 0
-        ? req.query.app_redirect_uri.trim()
-        : process.env.MOBILE_APP_REDIRECT_URI;
-
-    const state = createOAuthState(appRedirectUri);
+    const state = createOAuthState();
     const url = activationService.buildAuthorizationUrl(state);
 
-    res.redirect(url);
+    return res.redirect(url);
   } catch (error: unknown) {
     console.error(chalk.red("Error iniciando OAuth con Uber"));
 
     if (error instanceof Error) {
       console.error(chalk.red(error.message));
+    } else {
+      console.error(chalk.red("Error desconocido"));
     }
 
-    res.status(500).json({
+    return void res.status(500).json({
       ok: false,
       message: "No fue posible iniciar sesión con Uber"
     });
@@ -67,39 +63,35 @@ export async function handleUberAuthCallback(req: Request, res: Response): Promi
     const { code, state, error, error_description } = req.query;
 
     if (error) {
-      res.status(400).json({
+      return void res.status(400).json({
         ok: false,
         message: "Uber devolvió un error en OAuth",
         error,
         error_description: error_description ?? null
       });
-      return;
     }
 
     if (!code || typeof code !== "string") {
-      res.status(400).json({
+      return void res.status(400).json({
         ok: false,
         message: "No se recibió el code de autorización"
       });
-      return;
     }
 
     if (!state || typeof state !== "string") {
-      res.status(400).json({
+      return void res.status(400).json({
         ok: false,
         message: "No se recibió el state"
       });
-      return;
     }
 
     const statePayload = verifyOAuthState(state);
 
     if (!statePayload) {
-      res.status(400).json({
+      return void res.status(400).json({
         ok: false,
         message: "State inválido o expirado"
       });
-      return;
     }
 
     const activationService = getUberActivationService();
@@ -115,15 +107,7 @@ export async function handleUberAuthCallback(req: Request, res: Response): Promi
 
     console.log(chalk.green("✓ Merchant autenticado correctamente con Uber"));
 
-    if (statePayload.appRedirectUri) {
-      const redirectUrl = new URL(statePayload.appRedirectUri);
-      redirectUrl.searchParams.set("session_token", sessionToken);
-
-      res.redirect(redirectUrl.toString());
-      return;
-    }
-
-    res.status(200).json({
+    return void res.status(200).json({
       ok: true,
       message: "Merchant autenticado correctamente",
       data: {
@@ -138,9 +122,11 @@ export async function handleUberAuthCallback(req: Request, res: Response): Promi
 
     if (error instanceof Error) {
       console.error(chalk.red(error.message));
+    } else {
+      console.error(chalk.red("Error desconocido"));
     }
 
-    res.status(500).json({
+    return void res.status(500).json({
       ok: false,
       message: "No fue posible completar la autenticación con Uber"
     });
@@ -152,17 +138,16 @@ export async function getMerchantStores(req: Request, res: Response): Promise<vo
     const session = getSessionFromRequest(req);
 
     if (!session) {
-      res.status(401).json({
+      return void res.status(401).json({
         ok: false,
         message: "Sesión merchant inválida o expirada"
       });
-      return;
     }
 
     const activationService = getUberActivationService();
     const stores = await activationService.getMerchantStores(session.accessToken);
 
-    res.status(200).json({
+    return void res.status(200).json({
       ok: true,
       message: "Tiendas obtenidas correctamente",
       data: stores
@@ -172,9 +157,11 @@ export async function getMerchantStores(req: Request, res: Response): Promise<vo
 
     if (error instanceof Error) {
       console.error(chalk.red(error.message));
+    } else {
+      console.error(chalk.red("Error desconocido"));
     }
 
-    res.status(500).json({
+    return void res.status(500).json({
       ok: false,
       message: "No fue posible obtener las tiendas del merchant"
     });
@@ -186,21 +173,19 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
     const session = getSessionFromRequest(req);
 
     if (!session) {
-      res.status(401).json({
+      return void res.status(401).json({
         ok: false,
         message: "Sesión merchant inválida o expirada"
       });
-      return;
     }
 
     const { storeId } = req.params;
 
     if (!storeId || Array.isArray(storeId)) {
-      res.status(400).json({
+      return void res.status(400).json({
         ok: false,
         message: "Falta el storeId o el formato es inválido"
       });
-      return;
     }
 
     const body = req.body as Partial<UberActivateStoreRequest> | undefined;
@@ -230,7 +215,7 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
       payload
     );
 
-    res.status(200).json({
+    return void res.status(200).json({
       ok: true,
       message: "Store activada correctamente",
       data: result
@@ -240,9 +225,11 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
 
     if (error instanceof Error) {
       console.error(chalk.red(error.message));
+    } else {
+      console.error(chalk.red("Error desconocido"));
     }
 
-    res.status(500).json({
+    return void res.status(500).json({
       ok: false,
       message: "No fue posible activar la store"
     });
@@ -250,14 +237,29 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
 }
 
 export async function getMerchantSessionInfo(req: Request, res: Response): Promise<void> {
-  const session = getSessionFromRequest(req);
+  try {
+    const session = getSessionFromRequest(req);
 
-  res.status(200).json({
-    ok: true,
-    data: {
-      authenticated: !!session,
-      expiresAt: session?.expiresAt ?? null,
-      scope: session?.scope ?? null
+    return void res.status(200).json({
+      ok: true,
+      data: {
+        authenticated: !!session,
+        expiresAt: session?.expiresAt ?? null,
+        scope: session?.scope ?? null
+      }
+    });
+  } catch (error: unknown) {
+    console.error(chalk.red("Error consultando sesión del merchant"));
+
+    if (error instanceof Error) {
+      console.error(chalk.red(error.message));
+    } else {
+      console.error(chalk.red("Error desconocido"));
     }
-  });
+
+    return void res.status(500).json({
+      ok: false,
+      message: "No fue posible obtener la sesión del merchant"
+    });
+  }
 }
