@@ -1,6 +1,9 @@
 import { Request, Response } from "express";
 import chalk from "chalk";
-import { getUberActivationService } from "../services/uberActivation.service";
+import {
+  getUberActivationService,
+  UberApiRequestError
+} from "../services/uberActivation.service";
 import { UberActivateStoreRequest } from "../types/uber";
 import { createOAuthState, verifyOAuthState } from "../utils/oauthState";
 import {
@@ -35,6 +38,66 @@ function getSessionFromRequest(req: Request): MerchantSessionPayload | null {
   return readMerchantSessionToken(token);
 }
 
+function sendDetailedError(
+  res: Response,
+  defaultMessage: string,
+  error: unknown,
+  context?: Record<string, unknown>
+): void {
+  console.error(chalk.red(defaultMessage));
+
+  if (error instanceof UberApiRequestError) {
+    console.error(chalk.red(error.message));
+
+    res.status(error.statusCode).json({
+      ok: false,
+      message: defaultMessage,
+      error: {
+        source: error.source,
+        statusCode: error.statusCode,
+        detail: error.message,
+        requestUrl: error.requestUrl ?? null,
+        response: error.details ?? null,
+        context: context ?? null
+      }
+    });
+    return;
+  }
+
+  if (error instanceof Error) {
+    console.error(chalk.red(error.message));
+
+    res.status(500).json({
+      ok: false,
+      message: defaultMessage,
+      error: {
+        source: "server",
+        statusCode: 500,
+        detail: error.message,
+        requestUrl: null,
+        response: null,
+        context: context ?? null
+      }
+    });
+    return;
+  }
+
+  console.error(chalk.red("Error desconocido"));
+
+  res.status(500).json({
+    ok: false,
+    message: defaultMessage,
+    error: {
+      source: "server",
+      statusCode: 500,
+      detail: "Error desconocido",
+      requestUrl: null,
+      response: null,
+      context: context ?? null
+    }
+  });
+}
+
 export async function startUberLogin(req: Request, res: Response): Promise<void> {
   try {
     const activationService = getUberActivationService();
@@ -43,18 +106,11 @@ export async function startUberLogin(req: Request, res: Response): Promise<void>
 
     return void res.redirect(url);
   } catch (error: unknown) {
-    console.error(chalk.red("Error iniciando OAuth con Uber"));
-
-    if (error instanceof Error) {
-      console.error(chalk.red(error.message));
-    } else {
-      console.error(chalk.red("Error desconocido"));
-    }
-
-    return void res.status(500).json({
-      ok: false,
-      message: "No fue posible iniciar sesión con Uber"
-    });
+    return sendDetailedError(
+      res,
+      "No fue posible iniciar sesión con Uber",
+      error
+    );
   }
 }
 
@@ -66,8 +122,15 @@ export async function handleUberAuthCallback(req: Request, res: Response): Promi
       return void res.status(400).json({
         ok: false,
         message: "Uber devolvió un error en OAuth",
-        error,
-        error_description: error_description ?? null
+        error: {
+          source: "uber",
+          statusCode: 400,
+          detail: typeof error === "string" ? error : "OAuth error",
+          response: {
+            error,
+            error_description: error_description ?? null
+          }
+        }
       });
     }
 
@@ -118,18 +181,11 @@ export async function handleUberAuthCallback(req: Request, res: Response): Promi
       }
     });
   } catch (error: unknown) {
-    console.error(chalk.red("Error en callback OAuth de Uber"));
-
-    if (error instanceof Error) {
-      console.error(chalk.red(error.message));
-    } else {
-      console.error(chalk.red("Error desconocido"));
-    }
-
-    return void res.status(500).json({
-      ok: false,
-      message: "No fue posible completar la autenticación con Uber"
-    });
+    return sendDetailedError(
+      res,
+      "No fue posible completar la autenticación con Uber",
+      error
+    );
   }
 }
 
@@ -153,18 +209,11 @@ export async function getMerchantStores(req: Request, res: Response): Promise<vo
       data: stores
     });
   } catch (error: unknown) {
-    console.error(chalk.red("Error obteniendo stores del merchant"));
-
-    if (error instanceof Error) {
-      console.error(chalk.red(error.message));
-    } else {
-      console.error(chalk.red("Error desconocido"));
-    }
-
-    return void res.status(500).json({
-      ok: false,
-      message: "No fue posible obtener las tiendas del merchant"
-    });
+    return sendDetailedError(
+      res,
+      "No fue posible obtener las tiendas del merchant",
+      error
+    );
   }
 }
 
@@ -217,18 +266,19 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
       data: result
     });
   } catch (error: unknown) {
-    console.error(chalk.red("Error activando store del merchant"));
-
-    if (error instanceof Error) {
-      console.error(chalk.red(error.message));
-    } else {
-      console.error(chalk.red("Error desconocido"));
-    }
-
-    return void res.status(500).json({
-      ok: false,
-      message: "No fue posible activar la store"
-    });
+    return sendDetailedError(
+      res,
+      "No fue posible activar la store",
+      error,
+      {
+        storeId: req.params.storeId ?? null,
+        requestBody: {
+          is_order_manager: req.body?.is_order_manager ?? null,
+          integrator_store_id: req.body?.integrator_store_id ?? null,
+          integrator_brand_id: req.body?.integrator_brand_id ?? null
+        }
+      }
+    );
   }
 }
 
@@ -245,17 +295,10 @@ export async function getMerchantSessionInfo(req: Request, res: Response): Promi
       }
     });
   } catch (error: unknown) {
-    console.error(chalk.red("Error consultando sesión del merchant"));
-
-    if (error instanceof Error) {
-      console.error(chalk.red(error.message));
-    } else {
-      console.error(chalk.red("Error desconocido"));
-    }
-
-    return void res.status(500).json({
-      ok: false,
-      message: "No fue posible obtener la sesión del merchant"
-    });
+    return sendDetailedError(
+      res,
+      "No fue posible obtener la sesión del merchant",
+      error
+    );
   }
 }
