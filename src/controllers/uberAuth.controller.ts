@@ -41,7 +41,7 @@ export async function startUberLogin(req: Request, res: Response): Promise<void>
     const state = createOAuthState();
     const url = activationService.buildAuthorizationUrl(state);
 
-    return res.redirect(url);
+    return void res.redirect(url);
   } catch (error: unknown) {
     console.error(chalk.red("Error iniciando OAuth con Uber"));
 
@@ -202,10 +202,6 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
       integrator_brand_id:
         body?.integrator_brand_id ??
         process.env.UBER_DEFAULT_INTEGRATOR_BRAND_ID ??
-        undefined,
-      merchant_store_id:
-        body?.merchant_store_id ??
-        process.env.UBER_DEFAULT_MERCHANT_STORE_ID ??
         undefined
     };
 
