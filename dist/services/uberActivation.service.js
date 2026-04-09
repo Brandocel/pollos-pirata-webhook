@@ -8,12 +8,6 @@ exports.getUberActivationService = getUberActivationService;
 const axios_1 = __importDefault(require("axios"));
 const chalk_1 = __importDefault(require("chalk"));
 class UberActivationService {
-    clientId;
-    clientSecret;
-    redirectUri;
-    apiBaseUrl;
-    authBaseUrl;
-    http;
     constructor() {
         const clientId = process.env.UBER_CLIENT_ID;
         const clientSecret = process.env.UBER_CLIENT_SECRET;

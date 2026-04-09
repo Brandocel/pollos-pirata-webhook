@@ -8,14 +8,9 @@ exports.getUberApiService = getUberApiService;
 const axios_1 = __importDefault(require("axios"));
 const chalk_1 = __importDefault(require("chalk"));
 class UberApiService {
-    clientId;
-    clientSecret;
-    apiBaseUrl;
-    authBaseUrl;
-    http;
-    accessToken = null;
-    accessTokenExpiresAt = 0;
     constructor() {
+        this.accessToken = null;
+        this.accessTokenExpiresAt = 0;
         const clientId = process.env.UBER_CLIENT_ID;
         const clientSecret = process.env.UBER_CLIENT_SECRET;
         const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://api.uber.com";

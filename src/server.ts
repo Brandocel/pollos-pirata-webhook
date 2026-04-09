@@ -4,6 +4,7 @@ import chalk from "chalk";
 import cors, { CorsOptions } from "cors";
 import webhookRoutes from "./routes/webhook.routes";
 import uberAuthRoutes from "./routes/uberAuth.routes";
+import publicRoutes from "./routes/public.routes";
 import { setupSwagger } from "./docs/swagger";
 
 const app: Application = express();
@@ -15,7 +16,10 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .filter(Boolean);
 
 const corsOptions: CorsOptions = {
-  origin: (origin: string | undefined, callback: (arg0: Error | null, arg1: boolean | undefined) => void) => {
+  origin: (
+    origin: string | undefined,
+    callback: (arg0: Error | null, arg1: boolean | undefined) => void
+  ) => {
     if (!origin) {
       return callback(null, true);
     }
@@ -77,16 +81,9 @@ app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
 setupSwagger(app as express.Express);
 
+app.use(publicRoutes);
 app.use("/webhooks", webhookRoutes);
 app.use("/uber", uberAuthRoutes);
-
-/**
- * Esta línea estaba duplicando webhookRoutes dentro de /uber
- * y podía causar comportamientos raros.
- * La quitamos:
- *
- * app.use("/uber", webhookRoutes);
- */
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
@@ -125,6 +122,7 @@ app.listen(port, "0.0.0.0", () => {
   console.log(chalk.white(`URL pública/base: ${publicUrl}`));
   console.log(chalk.white(`Health: ${publicUrl}/health`));
   console.log(chalk.white(`Swagger: ${publicUrl}/docs`));
+  console.log(chalk.white(`Privacy: ${publicUrl}/privacy`));
   console.log(chalk.white(`OAuth Login: ${publicUrl}/uber/auth/login`));
   console.log(chalk.white(`OAuth Callback: ${publicUrl}/uber/auth/callback`));
   console.log(chalk.white(`Session: ${publicUrl}/uber/session`));
