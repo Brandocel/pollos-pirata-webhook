@@ -20,7 +20,7 @@ const swaggerDocument = {
     title: "Pollos Pirata - Uber Eats Integration API",
     version: "1.0.0",
     description:
-      "Documentación interactiva para probar los endpoints de OAuth, activación de tiendas, webhooks y consulta de pedidos de Uber Eats."
+      "Documentación interactiva para probar los endpoints de OAuth, activación de tiendas, configuración de integración, webhooks y consulta de pedidos de Uber Eats."
   },
   servers: [
     {
@@ -39,7 +39,7 @@ const swaggerDocument = {
     },
     {
       name: "Stores",
-      description: "Consulta y activación de tiendas"
+      description: "Consulta, activación y configuración de integración de tiendas"
     },
     {
       name: "Orders",
@@ -182,25 +182,7 @@ const swaggerDocument = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  is_order_manager: {
-                    type: "boolean",
-                    example: true
-                  },
-                  integrator_store_id: {
-                    type: "string",
-                    example: "pollos-pirata-store-001"
-                  },
-                  integrator_brand_id: {
-                    type: "string",
-                    example: "pollos-pirata-brand-001"
-                  },
-                  merchant_store_id: {
-                    type: "string",
-                    example: "pollos-pirata-merchant-store-001"
-                  }
-                }
+                $ref: "#/components/schemas/UberActivateStoreRequest"
               }
             }
           }
@@ -208,6 +190,108 @@ const swaggerDocument = {
         responses: {
           "200": {
             description: "Store activada correctamente"
+          },
+          "401": {
+            description: "Sesión inválida o expirada"
+          }
+        }
+      }
+    },
+    "/uber/stores/{storeId}/integration": {
+      get: {
+        tags: ["Stores"],
+        summary: "Obtener detalle de integración de una store",
+        security: [
+          {
+            bearerAuth: []
+          }
+        ],
+        parameters: [
+          {
+            name: "storeId",
+            in: "path",
+            required: true,
+            schema: {
+              type: "string"
+            }
+          }
+        ],
+        responses: {
+          "200": {
+            description: "Detalle de integración obtenido correctamente"
+          },
+          "401": {
+            description: "Sesión inválida o expirada"
+          },
+          "404": {
+            description: "No se encontró la integración de la store"
+          }
+        }
+      },
+      put: {
+        tags: ["Stores"],
+        summary: "Actualizar detalle de integración de una store",
+        security: [
+          {
+            bearerAuth: []
+          }
+        ],
+        parameters: [
+          {
+            name: "storeId",
+            in: "path",
+            required: true,
+            schema: {
+              type: "string"
+            }
+          }
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/UberUpdateStoreIntegrationRequest"
+              }
+            }
+          }
+        },
+        responses: {
+          "200": {
+            description: "Integración actualizada correctamente"
+          },
+          "204": {
+            description: "Integración actualizada sin contenido"
+          },
+          "401": {
+            description: "Sesión inválida o expirada"
+          }
+        }
+      },
+      delete: {
+        tags: ["Stores"],
+        summary: "Remover integración de una store",
+        security: [
+          {
+            bearerAuth: []
+          }
+        ],
+        parameters: [
+          {
+            name: "storeId",
+            in: "path",
+            required: true,
+            schema: {
+              type: "string"
+            }
+          }
+        ],
+        responses: {
+          "200": {
+            description: "Integración removida correctamente"
+          },
+          "204": {
+            description: "Integración removida sin contenido"
           },
           "401": {
             description: "Sesión inválida o expirada"
@@ -323,6 +407,48 @@ const swaggerDocument = {
           resource_href: {
             type: "string",
             example: "https://api.uber.com/v2/eats/order/order_abc123"
+          }
+        }
+      },
+      UberActivateStoreRequest: {
+        type: "object",
+        properties: {
+          is_order_manager: {
+            type: "boolean",
+            example: true
+          },
+          integrator_store_id: {
+            type: "string",
+            example: "pollos-pirata-store-001"
+          },
+          integrator_brand_id: {
+            type: "string",
+            example: "pollos-pirata-brand-001"
+          },
+          merchant_store_id: {
+            type: "string",
+            example: "pollos-pirata-merchant-store-001"
+          }
+        }
+      },
+      UberUpdateStoreIntegrationRequest: {
+        type: "object",
+        properties: {
+          is_order_manager: {
+            type: "boolean",
+            example: true
+          },
+          integrator_store_id: {
+            type: "string",
+            example: "pollos-pirata-store-002"
+          },
+          integrator_brand_id: {
+            type: "string",
+            example: "pollos-pirata-brand-002"
+          },
+          merchant_store_id: {
+            type: "string",
+            example: "pollos-pirata-merchant-store-002"
           }
         }
       }
