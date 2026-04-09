@@ -66,6 +66,8 @@ const swaggerDocument = {
       get: {
         tags: ["OAuth"],
         summary: "Iniciar login OAuth con Uber",
+        description:
+          "Este endpoint redirige a Uber para iniciar OAuth. Debe abrirse directamente en el navegador y no desde Swagger Execute.",
         responses: {
           "302": {
             description: "Redirección a Uber OAuth"
@@ -93,6 +95,22 @@ const swaggerDocument = {
             schema: {
               type: "string"
             }
+          },
+          {
+            name: "error",
+            in: "query",
+            required: false,
+            schema: {
+              type: "string"
+            }
+          },
+          {
+            name: "error_description",
+            in: "query",
+            required: false,
+            schema: {
+              type: "string"
+            }
           }
         ],
         responses: {
@@ -106,9 +124,17 @@ const swaggerDocument = {
       get: {
         tags: ["OAuth"],
         summary: "Consultar si existe sesión merchant activa",
+        security: [
+          {
+            bearerAuth: []
+          }
+        ],
         responses: {
           "200": {
             description: "Estado de sesión"
+          },
+          "401": {
+            description: "Sesión inválida o expirada"
           }
         }
       }
@@ -117,9 +143,17 @@ const swaggerDocument = {
       get: {
         tags: ["Stores"],
         summary: "Obtener stores del merchant autenticado",
+        security: [
+          {
+            bearerAuth: []
+          }
+        ],
         responses: {
           "200": {
             description: "Stores obtenidas correctamente"
+          },
+          "401": {
+            description: "Sesión inválida o expirada"
           }
         }
       }
@@ -128,6 +162,11 @@ const swaggerDocument = {
       post: {
         tags: ["Stores"],
         summary: "Activar una store con pos_data",
+        security: [
+          {
+            bearerAuth: []
+          }
+        ],
         parameters: [
           {
             name: "storeId",
@@ -169,6 +208,9 @@ const swaggerDocument = {
         responses: {
           "200": {
             description: "Store activada correctamente"
+          },
+          "401": {
+            description: "Sesión inválida o expirada"
           }
         }
       }
@@ -177,6 +219,11 @@ const swaggerDocument = {
       get: {
         tags: ["Orders"],
         summary: "Consultar un pedido manualmente",
+        security: [
+          {
+            bearerAuth: []
+          }
+        ],
         parameters: [
           {
             name: "orderId",
@@ -190,6 +237,9 @@ const swaggerDocument = {
         responses: {
           "200": {
             description: "Pedido obtenido correctamente"
+          },
+          "401": {
+            description: "Sesión inválida o expirada"
           }
         }
       }
@@ -228,6 +278,15 @@ const swaggerDocument = {
     }
   },
   components: {
+    securitySchemes: {
+      bearerAuth: {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "JWT",
+        description:
+          "Pega aquí el session_token generado por /uber/auth/callback. Swagger enviará Authorization: Bearer <token>."
+      }
+    },
     schemas: {
       UberWebhookEvent: {
         type: "object",
@@ -272,5 +331,13 @@ const swaggerDocument = {
 };
 
 export function setupSwagger(app: Express): void {
-  app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+  app.use(
+    "/docs",
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerDocument, {
+      swaggerOptions: {
+        persistAuthorization: true
+      }
+    })
+  );
 }
