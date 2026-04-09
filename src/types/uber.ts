@@ -72,7 +72,7 @@ export interface UberCart {
 }
 
 export interface UberLocation {
-  type?: "STREET_ADDRESS" | "GOOGLE_PLACE" | string;
+  type?: 'STREET_ADDRESS' | 'GOOGLE_PLACE' | string;
   street_address?: string;
   latitude?: number;
   longitude?: number;
@@ -84,7 +84,7 @@ export interface UberLocation {
 
 export interface UberDeliveryInfo {
   location?: UberLocation;
-  type?: "DELIVER_TO_DOOR" | "CURBSIDE" | "LEAVE_AT_DOOR" | string;
+  type?: 'DELIVER_TO_DOOR' | 'CURBSIDE' | 'LEAVE_AT_DOOR' | string;
 }
 
 export interface UberEater {
@@ -112,7 +112,7 @@ export interface UberPayment {
   charges?: UberCharges;
 }
 
-export interface UberStore {
+export interface UberStoreReference {
   id?: string;
   name?: string;
   external_reference_id?: string;
@@ -129,26 +129,11 @@ export interface UberOrderDetails {
   placed_at?: string;
   brand?: string;
   fulfillment_type?: string;
-  store?: UberStore;
+  store?: UberStoreReference;
   eater?: UberEater;
   eaters?: UberEater[];
   cart?: UberCart;
   payment?: UberPayment;
-}
-
-export interface UberOAuthTokenResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  refresh_token?: string;
-  scope?: string;
-}
-
-export interface UberActivateStoreRequest {
-  is_order_manager?: boolean;
-  integrator_store_id?: string;
-  integrator_brand_id?: string;
-  merchant_store_id?: string;
 }
 
 export interface UberOAuthTokenResponse {
@@ -166,7 +151,10 @@ export interface UberStore {
   partner_store_id?: string;
   timezone?: string;
   merchant_store_id?: string;
-  integration_enabled?: boolean;
+  pos_data?: {
+    integration_enabled?: boolean;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
@@ -175,4 +163,21 @@ export interface UberActivateStoreRequest {
   integrator_store_id?: string;
   integrator_brand_id?: string;
   merchant_store_id?: string;
+}
+
+export interface UberUpdateStoreIntegrationRequest {
+  is_order_manager?: boolean;
+  integrator_store_id?: string;
+  integrator_brand_id?: string;
+  merchant_store_id?: string;
+}
+
+export interface UberStoreIntegrationDetails {
+  store_id: string;
+  is_order_manager?: boolean;
+  integrator_store_id?: string | null;
+  integrator_brand_id?: string | null;
+  merchant_store_id?: string | null;
+  integration_enabled?: boolean;
+  raw?: unknown;
 }

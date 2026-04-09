@@ -3,7 +3,9 @@ import chalk from "chalk";
 import {
   UberActivateStoreRequest,
   UberOAuthTokenResponse,
-  UberStore
+  UberStore,
+  UberStoreIntegrationDetails,
+  UberUpdateStoreIntegrationRequest
 } from "../types/uber";
 
 export class UberApiRequestError extends Error {
@@ -112,6 +114,60 @@ export class UberActivationService {
     );
   }
 
+  private buildStorePosDataUrl(
+    storeId: string,
+    payload?: UberActivateStoreRequest | UberUpdateStoreIntegrationRequest
+  ): string {
+    const params = new URLSearchParams();
+
+    if (typeof payload?.is_order_manager === "boolean") {
+      params.append("is_order_manager", String(payload.is_order_manager));
+    }
+
+    if (payload?.integrator_store_id) {
+      params.append("integrator_store_id", payload.integrator_store_id);
+    }
+
+    if (payload?.integrator_brand_id) {
+      params.append("integrator_brand_id", payload.integrator_brand_id);
+    }
+
+    if (payload?.merchant_store_id) {
+      params.append("merchant_store_id", payload.merchant_store_id);
+    }
+
+    const queryString = params.toString();
+
+    return `${this.apiBaseUrl}/v1/eats/stores/${storeId}/pos_data${
+      queryString ? `?${queryString}` : ""
+    }`;
+  }
+
+  private mapIntegrationDetails(storeId: string, raw: unknown): UberStoreIntegrationDetails {
+    const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
+
+    const integrationEnabled =
+      typeof data.integration_enabled === "boolean"
+        ? data.integration_enabled
+        : typeof data.pos_integration_enabled === "boolean"
+          ? data.pos_integration_enabled
+          : undefined;
+
+    return {
+      store_id: storeId,
+      is_order_manager:
+        typeof data.is_order_manager === "boolean" ? data.is_order_manager : undefined,
+      integrator_store_id:
+        typeof data.integrator_store_id === "string" ? data.integrator_store_id : null,
+      integrator_brand_id:
+        typeof data.integrator_brand_id === "string" ? data.integrator_brand_id : null,
+      merchant_store_id:
+        typeof data.merchant_store_id === "string" ? data.merchant_store_id : null,
+      integration_enabled: integrationEnabled,
+      raw
+    };
+  }
+
   public buildAuthorizationUrl(state: string): string {
     const params = new URLSearchParams();
     params.append("client_id", this.clientId);
@@ -214,24 +270,7 @@ export class UberActivationService {
     storeId: string,
     payload: UberActivateStoreRequest
   ): Promise<unknown> {
-    const params = new URLSearchParams();
-
-    if (typeof payload.is_order_manager === "boolean") {
-      params.append("is_order_manager", String(payload.is_order_manager));
-    }
-
-    if (payload.integrator_store_id) {
-      params.append("integrator_store_id", payload.integrator_store_id);
-    }
-
-    if (payload.integrator_brand_id) {
-      params.append("integrator_brand_id", payload.integrator_brand_id);
-    }
-
-    const queryString = params.toString();
-    const requestUrl = `${this.apiBaseUrl}/v1/eats/stores/${storeId}/pos_data${
-      queryString ? `?${queryString}` : ""
-    }`;
+    const requestUrl = this.buildStorePosDataUrl(storeId, payload);
 
     try {
       const response = await this.http.post(
@@ -258,6 +297,121 @@ export class UberActivationService {
 
       throw new UberApiRequestError(
         `No fue posible activar la store ${storeId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
+    }
+  }
+
+  public async getStoreIntegrationDetails(
+    accessToken: string,
+    storeId: string
+  ): Promise<UberStoreIntegrationDetails> {
+    const requestUrl = this.buildStorePosDataUrl(storeId);
+
+    try {
+      const response = await this.http.get(
+        requestUrl,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+
+      console.log(chalk.green(`✓ Detalles de integración obtenidos para store ${storeId}`));
+
+      return this.mapIntegrationDetails(storeId, response.data);
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw this.buildAxiosError(
+          error,
+          `No fue posible obtener el detalle de integración de la store ${storeId}`,
+          requestUrl
+        );
+      }
+
+      throw new UberApiRequestError(
+        `No fue posible obtener el detalle de integración de la store ${storeId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
+    }
+  }
+
+  public async updateStoreIntegration(
+    accessToken: string,
+    storeId: string,
+    payload: UberUpdateStoreIntegrationRequest
+  ): Promise<unknown> {
+    const requestUrl = this.buildStorePosDataUrl(storeId, payload);
+
+    try {
+      const response = await this.http.put(
+        requestUrl,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      console.log(chalk.green(`✓ Integración de la store ${storeId} actualizada correctamente`));
+      return response.data;
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw this.buildAxiosError(
+          error,
+          `No fue posible actualizar la integración de la store ${storeId}`,
+          requestUrl
+        );
+      }
+
+      throw new UberApiRequestError(
+        `No fue posible actualizar la integración de la store ${storeId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
+    }
+  }
+
+  public async removeStoreIntegration(
+    accessToken: string,
+    storeId: string
+  ): Promise<unknown> {
+    const requestUrl = this.buildStorePosDataUrl(storeId);
+
+    try {
+      const response = await this.http.delete(
+        requestUrl,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`
+          }
+        }
+      );
+
+      console.log(chalk.green(`✓ Integración removida correctamente para store ${storeId}`));
+      return response.data;
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw this.buildAxiosError(
+          error,
+          `No fue posible remover la integración de la store ${storeId}`,
+          requestUrl
+        );
+      }
+
+      throw new UberApiRequestError(
+        `No fue posible remover la integración de la store ${storeId}`,
         500,
         null,
         "server",

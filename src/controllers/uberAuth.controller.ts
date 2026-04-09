@@ -4,7 +4,10 @@ import {
   getUberActivationService,
   UberApiRequestError
 } from "../services/uberActivation.service";
-import { UberActivateStoreRequest } from "../types/uber";
+import {
+  UberActivateStoreRequest,
+  UberUpdateStoreIntegrationRequest
+} from "../types/uber";
 import { createOAuthState, verifyOAuthState } from "../utils/oauthState";
 import {
   createMerchantSessionToken,
@@ -96,6 +99,36 @@ function sendDetailedError(
       context: context ?? null
     }
   });
+}
+
+function requireValidSession(req: Request, res: Response): MerchantSessionPayload | null {
+  const session = getSessionFromRequest(req);
+
+  if (!session) {
+    res.status(401).json({
+      ok: false,
+      message: "Sesión merchant inválida o expirada"
+    });
+
+    return null;
+  }
+
+  return session;
+}
+
+function requireValidStoreId(req: Request, res: Response): string | null {
+  const { storeId } = req.params;
+
+  if (!storeId || Array.isArray(storeId)) {
+    res.status(400).json({
+      ok: false,
+      message: "Falta el storeId o el formato es inválido"
+    });
+
+    return null;
+  }
+
+  return storeId;
 }
 
 export async function startUberLogin(req: Request, res: Response): Promise<void> {
@@ -191,13 +224,10 @@ export async function handleUberAuthCallback(req: Request, res: Response): Promi
 
 export async function getMerchantStores(req: Request, res: Response): Promise<void> {
   try {
-    const session = getSessionFromRequest(req);
+    const session = requireValidSession(req, res);
 
     if (!session) {
-      return void res.status(401).json({
-        ok: false,
-        message: "Sesión merchant inválida o expirada"
-      });
+      return;
     }
 
     const activationService = getUberActivationService();
@@ -219,22 +249,16 @@ export async function getMerchantStores(req: Request, res: Response): Promise<vo
 
 export async function activateMerchantStore(req: Request, res: Response): Promise<void> {
   try {
-    const session = getSessionFromRequest(req);
+    const session = requireValidSession(req, res);
 
     if (!session) {
-      return void res.status(401).json({
-        ok: false,
-        message: "Sesión merchant inválida o expirada"
-      });
+      return;
     }
 
-    const { storeId } = req.params;
+    const storeId = requireValidStoreId(req, res);
 
-    if (!storeId || Array.isArray(storeId)) {
-      return void res.status(400).json({
-        ok: false,
-        message: "Falta el storeId o el formato es inválido"
-      });
+    if (!storeId) {
+      return;
     }
 
     const body = req.body as Partial<UberActivateStoreRequest> | undefined;
@@ -251,6 +275,10 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
       integrator_brand_id:
         body?.integrator_brand_id ??
         process.env.UBER_DEFAULT_INTEGRATOR_BRAND_ID ??
+        undefined,
+      merchant_store_id:
+        body?.merchant_store_id ??
+        process.env.UBER_DEFAULT_MERCHANT_STORE_ID ??
         undefined
     };
 
@@ -275,8 +303,145 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
         requestBody: {
           is_order_manager: req.body?.is_order_manager ?? null,
           integrator_store_id: req.body?.integrator_store_id ?? null,
-          integrator_brand_id: req.body?.integrator_brand_id ?? null
+          integrator_brand_id: req.body?.integrator_brand_id ?? null,
+          merchant_store_id: req.body?.merchant_store_id ?? null
         }
+      }
+    );
+  }
+}
+
+export async function getMerchantStoreIntegrationDetails(req: Request, res: Response): Promise<void> {
+  try {
+    const session = requireValidSession(req, res);
+
+    if (!session) {
+      return;
+    }
+
+    const storeId = requireValidStoreId(req, res);
+
+    if (!storeId) {
+      return;
+    }
+
+    const result = await getUberActivationService().getStoreIntegrationDetails(
+      session.accessToken,
+      storeId
+    );
+
+    return void res.status(200).json({
+      ok: true,
+      message: "Detalle de integración obtenido correctamente",
+      data: result
+    });
+  } catch (error: unknown) {
+    return sendDetailedError(
+      res,
+      "No fue posible obtener el detalle de integración de la store",
+      error,
+      {
+        storeId: req.params.storeId ?? null
+      }
+    );
+  }
+}
+
+export async function updateMerchantStoreIntegration(req: Request, res: Response): Promise<void> {
+  try {
+    const session = requireValidSession(req, res);
+
+    if (!session) {
+      return;
+    }
+
+    const storeId = requireValidStoreId(req, res);
+
+    if (!storeId) {
+      return;
+    }
+
+    const body = req.body as Partial<UberUpdateStoreIntegrationRequest> | undefined;
+
+    const payload: UberUpdateStoreIntegrationRequest = {
+      is_order_manager:
+        typeof body?.is_order_manager === "boolean"
+          ? body.is_order_manager
+          : undefined,
+      integrator_store_id:
+        body?.integrator_store_id ??
+        process.env.UBER_DEFAULT_INTEGRATOR_STORE_ID ??
+        undefined,
+      integrator_brand_id:
+        body?.integrator_brand_id ??
+        process.env.UBER_DEFAULT_INTEGRATOR_BRAND_ID ??
+        undefined,
+      merchant_store_id:
+        body?.merchant_store_id ??
+        process.env.UBER_DEFAULT_MERCHANT_STORE_ID ??
+        undefined
+    };
+
+    const result = await getUberActivationService().updateStoreIntegration(
+      session.accessToken,
+      storeId,
+      payload
+    );
+
+    return void res.status(200).json({
+      ok: true,
+      message: "Integración de la store actualizada correctamente",
+      data: result
+    });
+  } catch (error: unknown) {
+    return sendDetailedError(
+      res,
+      "No fue posible actualizar la integración de la store",
+      error,
+      {
+        storeId: req.params.storeId ?? null,
+        requestBody: {
+          is_order_manager: req.body?.is_order_manager ?? null,
+          integrator_store_id: req.body?.integrator_store_id ?? null,
+          integrator_brand_id: req.body?.integrator_brand_id ?? null,
+          merchant_store_id: req.body?.merchant_store_id ?? null
+        }
+      }
+    );
+  }
+}
+
+export async function removeMerchantStoreIntegration(req: Request, res: Response): Promise<void> {
+  try {
+    const session = requireValidSession(req, res);
+
+    if (!session) {
+      return;
+    }
+
+    const storeId = requireValidStoreId(req, res);
+
+    if (!storeId) {
+      return;
+    }
+
+    const result = await getUberActivationService().removeStoreIntegration(
+      session.accessToken,
+      storeId
+    );
+
+    return void res.status(200).json({
+      ok: true,
+      message: "Integración de la store removida correctamente",
+      data: result
+    });
+  } catch (error: unknown) {
+    return sendDetailedError(
+      res,
+      "No fue posible remover la integración de la store",
+      error,
+      {
+        storeId: req.params.storeId ?? null
       }
     );
   }
