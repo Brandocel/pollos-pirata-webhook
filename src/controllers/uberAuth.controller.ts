@@ -1,35 +1,50 @@
 import { Request, Response } from "express";
 import chalk from "chalk";
-import crypto from "crypto";
 import { getUberActivationService } from "../services/uberActivation.service";
 import { UberActivateStoreRequest } from "../types/uber";
+import { createOAuthState, verifyOAuthState } from "../utils/oauthState";
+import {
+  createMerchantSessionToken,
+  readMerchantSessionToken,
+  MerchantSessionPayload
+} from "../utils/merchantSessionToken";
 
-interface MerchantSession {
-  accessToken: string;
-  refreshToken?: string;
-  expiresAt: number;
-  scope?: string;
+function getBearerToken(req: Request): string | null {
+  const authHeader = req.header("Authorization");
+
+  if (!authHeader) {
+    return null;
+  }
+
+  const [scheme, token] = authHeader.split(" ");
+
+  if (scheme !== "Bearer" || !token) {
+    return null;
+  }
+
+  return token.trim();
 }
 
-const oauthStateStore = new Map<string, number>();
-let merchantSession: MerchantSession | null = null;
+function getSessionFromRequest(req: Request): MerchantSessionPayload | null {
+  const token = getBearerToken(req);
 
-function createState(): string {
-  return crypto.randomBytes(24).toString("hex");
-}
+  if (!token) {
+    return null;
+  }
 
-function isMerchantSessionValid(): boolean {
-  if (!merchantSession) return false;
-  return Date.now() < merchantSession.expiresAt;
+  return readMerchantSessionToken(token);
 }
 
 export async function startUberLogin(req: Request, res: Response): Promise<void> {
   try {
     const activationService = getUberActivationService();
-    const state = createState();
 
-    oauthStateStore.set(state, Date.now());
+    const appRedirectUri =
+      typeof req.query.app_redirect_uri === "string" && req.query.app_redirect_uri.trim().length > 0
+        ? req.query.app_redirect_uri.trim()
+        : process.env.MOBILE_APP_REDIRECT_URI;
 
+    const state = createOAuthState(appRedirectUri);
     const url = activationService.buildAuthorizationUrl(state);
 
     res.redirect(url);
@@ -77,9 +92,9 @@ export async function handleUberAuthCallback(req: Request, res: Response): Promi
       return;
     }
 
-    const storedAt = oauthStateStore.get(state);
+    const statePayload = verifyOAuthState(state);
 
-    if (!storedAt) {
+    if (!statePayload) {
       res.status(400).json({
         ok: false,
         message: "State inválido o expirado"
@@ -87,25 +102,32 @@ export async function handleUberAuthCallback(req: Request, res: Response): Promi
       return;
     }
 
-    oauthStateStore.delete(state);
-
     const activationService = getUberActivationService();
     const tokenResponse = await activationService.exchangeCodeForToken(code);
     const stores = await activationService.getMerchantStores(tokenResponse.access_token);
 
-    merchantSession = {
+    const sessionToken = createMerchantSessionToken({
       accessToken: tokenResponse.access_token,
       refreshToken: tokenResponse.refresh_token,
       expiresAt: Date.now() + Math.max(tokenResponse.expires_in - 60, 60) * 1000,
       scope: tokenResponse.scope
-    };
+    });
 
     console.log(chalk.green("✓ Merchant autenticado correctamente con Uber"));
+
+    if (statePayload.appRedirectUri) {
+      const redirectUrl = new URL(statePayload.appRedirectUri);
+      redirectUrl.searchParams.set("session_token", sessionToken);
+
+      res.redirect(redirectUrl.toString());
+      return;
+    }
 
     res.status(200).json({
       ok: true,
       message: "Merchant autenticado correctamente",
       data: {
+        session_token: sessionToken,
         scope: tokenResponse.scope ?? null,
         expires_in: tokenResponse.expires_in,
         stores
@@ -127,16 +149,18 @@ export async function handleUberAuthCallback(req: Request, res: Response): Promi
 
 export async function getMerchantStores(req: Request, res: Response): Promise<void> {
   try {
-    if (!isMerchantSessionValid() || !merchantSession) {
+    const session = getSessionFromRequest(req);
+
+    if (!session) {
       res.status(401).json({
         ok: false,
-        message: "No hay una sesión de merchant activa. Primero entra a /uber/auth/login"
+        message: "Sesión merchant inválida o expirada"
       });
       return;
     }
 
     const activationService = getUberActivationService();
-    const stores = await activationService.getMerchantStores(merchantSession.accessToken);
+    const stores = await activationService.getMerchantStores(session.accessToken);
 
     res.status(200).json({
       ok: true,
@@ -159,10 +183,12 @@ export async function getMerchantStores(req: Request, res: Response): Promise<vo
 
 export async function activateMerchantStore(req: Request, res: Response): Promise<void> {
   try {
-    if (!isMerchantSessionValid() || !merchantSession) {
+    const session = getSessionFromRequest(req);
+
+    if (!session) {
       res.status(401).json({
         ok: false,
-        message: "No hay una sesión de merchant activa. Primero entra a /uber/auth/login"
+        message: "Sesión merchant inválida o expirada"
       });
       return;
     }
@@ -199,7 +225,7 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
     };
 
     const result = await getUberActivationService().activateStore(
-      merchantSession.accessToken,
+      session.accessToken,
       storeId,
       payload
     );
@@ -223,13 +249,15 @@ export async function activateMerchantStore(req: Request, res: Response): Promis
   }
 }
 
-export async function getMerchantSessionInfo(_req: Request, res: Response): Promise<void> {
+export async function getMerchantSessionInfo(req: Request, res: Response): Promise<void> {
+  const session = getSessionFromRequest(req);
+
   res.status(200).json({
     ok: true,
     data: {
-      authenticated: isMerchantSessionValid(),
-      expiresAt: merchantSession?.expiresAt ?? null,
-      scope: merchantSession?.scope ?? null
+      authenticated: !!session,
+      expiresAt: session?.expiresAt ?? null,
+      scope: session?.scope ?? null
     }
   });
 }

@@ -18,26 +18,19 @@ export class UberActivationService {
     const clientId = process.env.UBER_CLIENT_ID;
     const clientSecret = process.env.UBER_CLIENT_SECRET;
     const redirectUri = process.env.UBER_REDIRECT_URI;
-    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://api.uber.com";
-    const authBaseUrl = process.env.UBER_AUTH_BASE_URL || "https://auth.uber.com";
+    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
+    const authBaseUrl = process.env.UBER_AUTH_BASE_URL || "https://sandbox-login.uber.com";
 
-    if (!clientId) {
-      throw new Error("Falta la variable de entorno UBER_CLIENT_ID");
-    }
-
-    if (!clientSecret) {
-      throw new Error("Falta la variable de entorno UBER_CLIENT_SECRET");
-    }
-
-    if (!redirectUri) {
-      throw new Error("Falta la variable de entorno UBER_REDIRECT_URI");
-    }
+    if (!clientId) throw new Error("Falta UBER_CLIENT_ID");
+    if (!clientSecret) throw new Error("Falta UBER_CLIENT_SECRET");
+    if (!redirectUri) throw new Error("Falta UBER_REDIRECT_URI");
 
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.redirectUri = redirectUri;
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
     this.authBaseUrl = authBaseUrl.replace(/\/+$/, "");
+
     this.http = axios.create({
       timeout: 20000,
       headers: {
@@ -52,7 +45,7 @@ export class UberActivationService {
     params.append("client_id", this.clientId);
     params.append("response_type", "code");
     params.append("redirect_uri", this.redirectUri);
-    params.append("scope", "eats.pos_provisioning");
+    params.append("scope", "eats.pos_provisioning offline_access");
     params.append("state", state);
 
     return `${this.authBaseUrl}/oauth/v2/authorize?${params.toString()}`;
@@ -83,9 +76,7 @@ export class UberActivationService {
       if (axios.isAxiosError(error)) {
         console.error(chalk.red("Error intercambiando code por token merchant"));
         console.error(chalk.red(`Status: ${error.response?.status ?? "N/A"}`));
-        console.error(
-          chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`)
-        );
+        console.error(chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`));
       }
 
       throw new Error("No fue posible intercambiar el code por el token merchant");
@@ -105,26 +96,16 @@ export class UberActivationService {
 
       const raw = response.data;
 
-      if (Array.isArray(raw)) {
-        return raw as UberStore[];
-      }
-
-      if (Array.isArray(raw?.stores)) {
-        return raw.stores as UberStore[];
-      }
-
-      if (Array.isArray(raw?.data)) {
-        return raw.data as UberStore[];
-      }
+      if (Array.isArray(raw)) return raw as UberStore[];
+      if (Array.isArray(raw?.stores)) return raw.stores as UberStore[];
+      if (Array.isArray(raw?.data)) return raw.data as UberStore[];
 
       return [];
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         console.error(chalk.red("Error obteniendo stores del merchant"));
         console.error(chalk.red(`Status: ${error.response?.status ?? "N/A"}`));
-        console.error(
-          chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`)
-        );
+        console.error(chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`));
       }
 
       throw new Error("No fue posible obtener las stores del merchant");
@@ -167,15 +148,12 @@ export class UberActivationService {
       );
 
       console.log(chalk.green(`✓ Store ${storeId} activada correctamente`));
-
       return response.data;
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         console.error(chalk.red(`Error activando la store ${storeId}`));
         console.error(chalk.red(`Status: ${error.response?.status ?? "N/A"}`));
-        console.error(
-          chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`)
-        );
+        console.error(chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`));
       }
 
       throw new Error(`No fue posible activar la store ${storeId}`);

@@ -1,10 +1,10 @@
 import { Router } from "express";
 import {
-  activateMerchantStore,
-  getMerchantSessionInfo,
-  getMerchantStores,
+  startUberLogin,
   handleUberAuthCallback,
-  startUberLogin
+  getMerchantStores,
+  activateMerchantStore,
+  getMerchantSessionInfo
 } from "../controllers/uberAuth.controller";
 
 const router = Router();

@@ -16,10 +16,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .filter(Boolean);
 
 const corsOptions: CorsOptions = {
-  origin: (
-    origin: string | undefined,
-    callback: (arg0: Error | null, arg1: boolean | undefined) => void
-  ) => {
+  origin: (origin, callback) => {
     if (!origin) {
       return callback(null, true);
     }
@@ -61,10 +58,6 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
-/**
- * Webhooks de Uber:
- * se necesita el body crudo para validar firma
- */
 app.use(
   "/webhooks",
   express.raw({
@@ -73,9 +66,6 @@ app.use(
   })
 );
 
-/**
- * Para el resto de rutas sí usamos json/urlencoded
- */
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
@@ -104,8 +94,6 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
         message: err.message
       });
     }
-  } else {
-    console.error(chalk.red("Error desconocido"));
   }
 
   return res.status(500).json({

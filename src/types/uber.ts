@@ -150,3 +150,29 @@ export interface UberActivateStoreRequest {
   integrator_brand_id?: string;
   merchant_store_id?: string;
 }
+
+export interface UberOAuthTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  refresh_token?: string;
+  scope?: string;
+}
+
+export interface UberStore {
+  name?: string;
+  store_id: string;
+  status?: string;
+  partner_store_id?: string;
+  timezone?: string;
+  merchant_store_id?: string;
+  integration_enabled?: boolean;
+  [key: string]: unknown;
+}
+
+export interface UberActivateStoreRequest {
+  is_order_manager?: boolean;
+  integrator_store_id?: string;
+  integrator_brand_id?: string;
+  merchant_store_id?: string;
+}
