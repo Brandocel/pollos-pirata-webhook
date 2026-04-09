@@ -163,7 +163,7 @@ export class UberIntegrationService {
     const requestUrl = this.buildStorePosDataUrl(storeId, payload);
 
     try {
-      const response = await this.http.put(
+      const response = await this.http.patch(
         requestUrl,
         {},
         {
