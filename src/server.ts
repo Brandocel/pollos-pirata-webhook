@@ -4,6 +4,7 @@ import chalk from "chalk";
 import cors, { CorsOptions } from "cors";
 import webhookRoutes from "./routes/webhook.routes";
 import uberAuthRoutes from "./routes/uberAuth.routes";
+import uberIntegrationRoutes from "./routes/uberIntegration.routes";
 import publicRoutes from "./routes/public.routes";
 import { setupSwagger } from "./docs/swagger";
 
@@ -74,6 +75,7 @@ setupSwagger(app as express.Express);
 app.use(publicRoutes);
 app.use("/webhooks", webhookRoutes);
 app.use("/uber", uberAuthRoutes);
+app.use("/uber", uberIntegrationRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
@@ -115,6 +117,7 @@ app.listen(port, "0.0.0.0", () => {
   console.log(chalk.white(`OAuth Callback: ${publicUrl}/uber/auth/callback`));
   console.log(chalk.white(`Session: ${publicUrl}/uber/session`));
   console.log(chalk.white(`Stores: ${publicUrl}/uber/stores`));
+  console.log(chalk.white(`Store Integration: ${publicUrl}/uber/stores/{storeId}/integration`));
   console.log(chalk.white(`Webhook: ${publicUrl}/webhooks/uber/webhook`));
   console.log(chalk.white(`Allowed origins: ${allowedOrigins.join(", ") || "Todos"}`));
   console.log(chalk.green("Servidor iniciado correctamente"));
