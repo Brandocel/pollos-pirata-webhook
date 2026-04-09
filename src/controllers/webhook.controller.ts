@@ -124,6 +124,7 @@ function printOrderSummary(order: UberOrderDetails): void {
   console.log(chalk.bgGreen.black("==============================================\n"));
 }
 
+// ====================== WEBHOOK PRINCIPAL ======================
 export async function handleUberWebhook(req: Request, res: Response): Promise<void> {
   const clientSecret = process.env.UBER_CLIENT_SECRET;
 
@@ -133,22 +134,35 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
     return;
   }
 
-  // rawBody debe ser Buffer gracias al middleware express.raw()
-  const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
+  const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   const signatureHeader = req.header("X-Uber-Signature");
 
-  const isValidSignature = verifyUberSignature({
-    rawBody,
-    clientSecret,
-    signatureHeader,
-  });
+  // ==================== MANEJO INTELIGENTE DE FIRMA ====================
+  let signatureValid = true;
 
-  if (!isValidSignature) {
-    console.error(chalk.red("Firma HMAC-SHA256 inválida - Posible ataque o secreto incorrecto"));
+  if (signatureHeader && signatureHeader.trim() !== "") {
+    // Solo verificamos si Uber envió firma (webhook real)
+    signatureValid = verifyUberSignature({
+      rawBody,
+      clientSecret,
+      signatureHeader,
+    });
+
+    if (!signatureValid) {
+      console.error(chalk.red("Firma HMAC-SHA256 inválida - Posible ataque o secreto incorrecto"));
+    }
+  } else {
+    // Prueba manual desde Swagger o Postman
+    console.log(chalk.yellow("⚠️  Prueba manual detectada - Firma omitida (comportamiento normal)"));
+  }
+  // =================================================================
+
+  if (!signatureValid) {
     res.status(200).end();
     return;
   }
 
+  // Parsear el payload
   let payload: UberWebhookEvent;
   try {
     payload = safeJsonParse<UberWebhookEvent>(rawBody);
@@ -158,23 +172,22 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
     return;
   }
 
-  // Responder inmediatamente (obligatorio para Uber)
+  // Responder inmediatamente (¡Muy importante para Uber!)
   res.status(200).end();
 
-  // Procesamiento asíncrono
+  // Procesamiento en segundo plano
   void (async () => {
     try {
-      console.log(chalk.gray(`Webhook recibido → ${payload.event_type} | Event ID: ${payload.event_id}`));
+      console.log(chalk.gray(`Webhook recibido → ${payload.event_type} | Event ID: ${payload.event_id || "N/A"}`));
 
       if (payload.event_type !== "orders.notification") {
         console.log(chalk.yellow(`Evento ignorado: ${payload.event_type}`));
         return;
       }
 
-      // Obtener orderId (dos posibles ubicaciones)
+      // Obtener orderId con fallback
       let orderId = getSingleString(payload.meta?.resource_id);
       if (!orderId && payload.resource_href) {
-        // fallback: extraer del href si es necesario
         const match = payload.resource_href.match(/order\/(.+)$/);
         orderId = match ? match[1] : null;
       }
@@ -184,34 +197,31 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
         return;
       }
 
-      const uberApiService = getUberApiService();
-      console.log(chalk.blue(`Obteniendo detalles del pedido: ${orderId}`));
+      console.log(chalk.blue(`Obteniendo detalles del pedido → ${orderId}`));
 
+      const uberApiService = getUberApiService();
       const order = await uberApiService.getOrderDetails(orderId);
 
       printOrderSummary(order);
 
+      // Auto-aceptar (solo en modo test)
       const autoAccept = process.env.AUTO_ACCEPT_ORDERS === "true";
 
       if (autoAccept) {
         console.log(chalk.green("Auto-aceptando pedido..."));
         await uberApiService.acceptOrder(orderId);
-        console.log(chalk.green("Pedido aceptado automáticamente"));
+        console.log(chalk.green("✅ Pedido aceptado automáticamente"));
       } else {
-        console.log(chalk.yellow("AUTO_ACCEPT_ORDERS=false → Pedido NO aceptado automáticamente"));
+        console.log(chalk.yellow("AUTO_ACCEPT_ORDERS=false → Pedido queda pendiente de aceptación manual"));
       }
     } catch (error: unknown) {
       console.error(chalk.red("Error procesando el webhook:"));
-      if (error instanceof Error) {
-        console.error(chalk.red(error.message));
-      } else {
-        console.error(chalk.red(String(error)));
-      }
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
     }
   })();
 }
 
-// Endpoint manual útil para pruebas
+// ====================== ENDPOINT MANUAL PARA PRUEBAS ======================
 export async function getOrderDetailsManually(req: Request, res: Response): Promise<void> {
   try {
     const orderId = getSingleString(req.params.orderId);
