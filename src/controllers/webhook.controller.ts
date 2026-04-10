@@ -38,12 +38,6 @@ function extractOrderIdFromResourceHref(resourceHref?: string | null): string | 
     return null;
   }
 
-  /**
-   * Compatible con rutas tipo:
-   * - /v1/delivery/order/{order_id}
-   * - /v2/eats/order/{order_id}
-   * - cualquier variante que contenga /order/{id}
-   */
   const match = resourceHref.match(/\/order\/([^/?#]+)/i);
   if (!match?.[1]) {
     return null;
@@ -236,14 +230,7 @@ async function processOrdersNotification(payload: UberWebhookEvent): Promise<voi
   }
 
   if (!looksLikeUuid(orderId)) {
-    console.error(
-      chalk.red(`El order_id recibido no tiene formato UUID válido: ${orderId}`)
-    );
-    console.log(
-      chalk.yellow(
-        "Esto suele ocurrir en pruebas manuales con payload inventado. Uber real envía resource_id UUID."
-      )
-    );
+    console.error(chalk.red(`El order_id recibido no tiene formato UUID válido: ${orderId}`));
     return;
   }
 
@@ -314,24 +301,29 @@ async function processOtherWebhookEvent(payload: UberWebhookEvent): Promise<void
   }
 }
 
-// ====================== WEBHOOK PRINCIPAL ======================
 export async function handleUberWebhook(req: Request, res: Response): Promise<void> {
   const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+  const rawBodyText = rawBody.toString("utf8");
   const signatureHeader = req.header("X-Uber-Signature");
 
-  console.log(chalk.blue("=============================================="));
-  console.log(chalk.blue("Webhook de Uber recibido"));
-  console.log(chalk.blue(`Timestamp: ${new Date().toISOString()}`));
-  console.log(chalk.blue(`URL: ${req.originalUrl}`));
-  console.log(chalk.blue(`Method: ${req.method}`));
-  console.log(chalk.blue(`Content-Type: ${req.header("content-type") ?? "N/A"}`));
-  console.log(chalk.blue(`X-Uber-Signature presente: ${signatureHeader ? "Sí" : "No"}`));
-  console.log(chalk.blue(`Raw body length: ${rawBody.length}`));
-  console.log(chalk.blue("=============================================="));
+  console.log(chalk.blue("========================================================"));
+  console.log(chalk.blue(" WEBHOOK DE UBER RECIBIDO"));
+  console.log(chalk.blue(` Timestamp: ${new Date().toISOString()}`));
+  console.log(chalk.blue(` Método: ${req.method}`));
+  console.log(chalk.blue(` URL: ${req.originalUrl}`));
+  console.log(chalk.blue(` Content-Type: ${req.header("content-type") ?? "N/A"}`));
+  console.log(chalk.blue(` X-Uber-Signature presente: ${signatureHeader ? "Sí" : "No"}`));
+  console.log(chalk.blue(` Raw body length: ${rawBody.length}`));
+  console.log(chalk.blue(" Headers completos:"));
+  console.log(req.headers);
+  console.log(chalk.blue(" Raw body (texto):"));
+  console.log(rawBodyText || "[vacío]");
+  console.log(chalk.blue("========================================================"));
 
   if (rawBody.length === 0) {
     console.log(chalk.yellow("Webhook recibido con body vacío"));
     res.status(200).end();
+    console.log(chalk.green("✓ Respuesta 200 enviada por body vacío"));
     return;
   }
 
@@ -346,6 +338,7 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
         )
       );
       res.status(200).end();
+      console.log(chalk.green("✓ Respuesta 200 enviada después de firma inválida"));
       return;
     }
 
@@ -362,17 +355,15 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
     console.error(chalk.red("No se pudo parsear el JSON del webhook"));
     console.error(chalk.red(error instanceof Error ? error.message : String(error)));
     res.status(200).end();
+    console.log(chalk.green("✓ Respuesta 200 enviada después de JSON inválido"));
     return;
   }
 
   console.log(chalk.magenta("Payload completo del webhook:"));
   console.log(JSON.stringify(payload, null, 2));
 
-  /**
-   * Uber espera confirmación rápida del webhook.
-   * Respondemos 200 primero y luego procesamos asíncronamente.
-   */
   res.status(200).end();
+  console.log(chalk.green("✓ Respuesta 200 enviada a Uber correctamente"));
 
   void (async () => {
     try {
@@ -390,7 +381,6 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
   })();
 }
 
-// ====================== ENDPOINT MANUAL PARA PRUEBAS ======================
 export async function getOrderDetailsManually(req: Request, res: Response): Promise<void> {
   try {
     const orderId = getSingleString(req.params.orderId);

@@ -16,6 +16,15 @@ interface AcceptOrderPayload {
   order_pickup_instructions?: string;
 }
 
+interface ListStoreOrdersParams {
+  state?: string;
+  status?: string;
+  start_time?: string;
+  end_time?: string;
+  page_size?: number;
+  expand?: string;
+}
+
 export class UberApiService {
   private readonly clientId: string;
   private readonly clientSecret: string;
@@ -108,11 +117,6 @@ export class UberApiService {
     }
   }
 
-  /**
-   * Según el OpenAPI de Order Fulfillment:
-   * GET /v1/delivery/order/{order_id}
-   * Scope: eats.order
-   */
   public async getOrderDetails(orderId: string): Promise<UberOrderDetails> {
     const token = await this.getAccessToken();
     const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}`);
@@ -138,11 +142,6 @@ export class UberApiService {
     }
   }
 
-  /**
-   * Según el OpenAPI de Order Fulfillment:
-   * POST /v1/delivery/order/{order_id}/accept
-   * Scope: eats.order
-   */
   public async acceptOrder(orderId: string): Promise<void> {
     const token = await this.getAccessToken();
     const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}/accept`);
@@ -176,21 +175,9 @@ export class UberApiService {
     }
   }
 
-  /**
-   * Útil para depuración si quieres revisar si la orden existe por tienda
-   * según el mismo OpenAPI:
-   * GET /v1/delivery/store/{store_id}/orders
-   */
   public async listStoreOrders(
     storeId: string,
-    params?: {
-      state?: string;
-      status?: string;
-      start_time?: string;
-      end_time?: string;
-      page_size?: number;
-      expand?: string;
-    }
+    params?: ListStoreOrdersParams
   ): Promise<unknown> {
     const token = await this.getAccessToken();
     const requestUrl = this.buildUrl(`/v1/delivery/store/${storeId}/orders`);
