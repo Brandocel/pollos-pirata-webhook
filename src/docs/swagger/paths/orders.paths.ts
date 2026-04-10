@@ -3,7 +3,7 @@ export const ordersPaths = {
     get: {
       tags: ["Orders"],
       summary: "Obtener detalle de una orden de Uber Eats",
-      description: "Obtiene el detalle completo de una orden usando app token con scope de órdenes.",
+      description: "Obtiene el detalle completo de una orden usando delivery/order y fallback a eats/order.",
       parameters: [
         {
           name: "orderId",
@@ -104,6 +104,7 @@ export const ordersPaths = {
     post: {
       tags: ["Orders"],
       summary: "Aceptar pedido manualmente",
+      description: "Acepta el pedido usando POST /v1/delivery/order/{orderId}/accept",
       parameters: [
         {
           name: "orderId",
@@ -112,22 +113,6 @@ export const ordersPaths = {
           schema: { type: "string" }
         }
       ],
-      requestBody: {
-        required: false,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                reason: { type: "string" },
-                pickup_time: { type: "number" },
-                external_reference_id: { type: "string" },
-                order_pickup_instructions: { type: "string" }
-              }
-            }
-          }
-        }
-      },
       responses: {
         "200": {
           description: "Pedido aceptado correctamente"
@@ -140,6 +125,7 @@ export const ordersPaths = {
     post: {
       tags: ["Orders"],
       summary: "Denegar pedido manualmente",
+      description: "Deniega el pedido usando POST /v1/delivery/order/{orderId}/deny",
       parameters: [
         {
           name: "orderId",
@@ -148,35 +134,6 @@ export const ordersPaths = {
           schema: { type: "string" }
         }
       ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["reason"],
-              properties: {
-                reason: {
-                  type: "object",
-                  required: ["explanation", "code"],
-                  properties: {
-                    explanation: { type: "string" },
-                    code: { type: "string" },
-                    out_of_stock_items: {
-                      type: "array",
-                      items: { type: "string" }
-                    },
-                    invalid_items: {
-                      type: "array",
-                      items: { type: "string" }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
       responses: {
         "200": {
           description: "Pedido denegado correctamente"
@@ -189,6 +146,7 @@ export const ordersPaths = {
     post: {
       tags: ["Orders"],
       summary: "Cancelar pedido manualmente",
+      description: "Cancela el pedido usando POST /v1/delivery/order/{orderId}/cancel",
       parameters: [
         {
           name: "orderId",
@@ -203,11 +161,12 @@ export const ordersPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["reason"],
+              required: ["cancellation_reason"],
               properties: {
-                reason: { type: "string" },
-                details: { type: "string" },
-                cancelling_party: { type: "string" }
+                cancellation_reason: {
+                  type: "string",
+                  example: "CUSTOMER_CALLED_TO_CANCEL"
+                }
               }
             }
           }
@@ -279,10 +238,18 @@ export const ordersPaths = {
                     enum: ["get", "accept", "deny", "cancel", "update"]
                   }
                 },
-                accept_payload: { type: "object" },
-                deny_payload: { type: "object" },
-                cancel_payload: { type: "object" },
-                update_payload: { type: "object" }
+                cancel_payload: {
+                  type: "object",
+                  properties: {
+                    cancellation_reason: {
+                      type: "string",
+                      example: "CUSTOMER_CALLED_TO_CANCEL"
+                    }
+                  }
+                },
+                update_payload: {
+                  type: "object"
+                }
               }
             }
           }

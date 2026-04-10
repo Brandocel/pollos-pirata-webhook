@@ -9,47 +9,8 @@ interface UberTokenResponse {
   scope?: string;
 }
 
-interface AcceptOrderPayload {
-  reason: string;
-  pickup_time?: number;
-  external_reference_id?: string;
-  fields_relayed?: {
-    order_special_instructions?: boolean;
-    item_special_instructions?: boolean;
-    item_special_requests?: boolean;
-    promotions?: boolean;
-  };
-  order_pickup_instructions?: string;
-}
-
-export interface UberDenyOrderPayload {
-  reason: {
-    explanation: string;
-    code:
-      | "STORE_CLOSED"
-      | "POS_NOT_READY"
-      | "POS_OFFLINE"
-      | "ITEM_AVAILABILITY"
-      | "MISSING_ITEM"
-      | "MISSING_INFO"
-      | "PRICING"
-      | "DUPLICATE_ORDER"
-      | "OTHER";
-    out_of_stock_items?: string[];
-    invalid_items?: string[];
-  };
-}
-
 export interface UberCancelOrderPayload {
-  reason:
-    | "OUT_OF_ITEMS"
-    | "KITCHEN_CLOSED"
-    | "CUSTOMER_CALLED_TO_CANCEL"
-    | "RESTAURANT_TOO_BUSY"
-    | "CANNOT_COMPLETE_CUSTOMER_NOTE"
-    | "OTHER";
-  details?: string;
-  cancelling_party?: "MERCHANT" | "CUSTOMER";
+  cancellation_reason: string;
 }
 
 export interface ListStoreOrdersParams {
@@ -63,8 +24,6 @@ export interface ListStoreOrdersParams {
 
 export interface UberOrderValidationFlowPayload {
   actions: Array<"get" | "accept" | "deny" | "cancel" | "update">;
-  accept_payload?: Partial<AcceptOrderPayload>;
-  deny_payload?: UberDenyOrderPayload;
   cancel_payload?: UberCancelOrderPayload;
   update_payload?: Record<string, unknown>;
 }
@@ -94,7 +53,7 @@ export class UberApiService {
   constructor() {
     const clientId = process.env.UBER_CLIENT_ID;
     const clientSecret = process.env.UBER_CLIENT_SECRET;
-    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://api.uber.com";
+    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
     const authBaseUrl = process.env.UBER_AUTH_BASE_URL || "https://auth.uber.com";
 
     if (!clientId) {
@@ -143,7 +102,7 @@ export class UberApiService {
     form.append("client_id", this.clientId);
     form.append("client_secret", this.clientSecret);
     form.append("grant_type", "client_credentials");
-    form.append("scope", "eats.order");
+    form.append("scope", "eats.order eats.store");
 
     try {
       const response = await this.http.post<UberTokenResponse>(
@@ -199,8 +158,8 @@ export class UberApiService {
   public async getOrderDetails(orderId: string): Promise<UberOrderDetails> {
     const token = await this.getAccessToken();
 
-    const officialUrl = this.buildUrl(`/v2/eats/order/${orderId}`);
-    const legacyUrl = this.buildUrl(`/v1/delivery/order/${orderId}`);
+    const officialUrl = this.buildUrl(`/v1/delivery/order/${orderId}`);
+    const altUrl = this.buildUrl(`/v2/eats/order/${orderId}`);
 
     return this.requestWithFallback<UberOrderDetails>(
       [
@@ -209,52 +168,32 @@ export class UberApiService {
             headers: { Authorization: `Bearer ${token}` }
           }),
         () =>
-          this.http.get<UberOrderDetails>(legacyUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-            params: { expand: "carts,payment" }
+          this.http.get<UberOrderDetails>(altUrl, {
+            headers: { Authorization: `Bearer ${token}` }
           })
       ],
       `No fue posible obtener el detalle del pedido ${orderId}`
     );
   }
 
-  public async acceptOrder(
-    orderId: string,
-    partialPayload?: Partial<AcceptOrderPayload>
-  ): Promise<void> {
+  public async acceptOrder(orderId: string): Promise<unknown> {
     const token = await this.getAccessToken();
-    const requestUrl = this.buildUrl(`/v1/eats/orders/${orderId}/accept_pos_order`);
-
-    const acceptedBy = process.env.UBER_ACCEPTED_BY?.trim() || "Pollos Pirata";
-    const pickupInstructions =
-      process.env.UBER_PICKUP_INSTRUCTIONS?.trim() ||
-      "Pedido confirmado por Pollos Pirata";
-
-    const payload: AcceptOrderPayload = {
-      reason: partialPayload?.reason?.trim() || `Accepted by ${acceptedBy}`,
-      pickup_time: partialPayload?.pickup_time,
-      external_reference_id:
-        partialPayload?.external_reference_id || `POLLOS-PIRATA-${orderId.slice(0, 8)}`,
-      order_pickup_instructions:
-        partialPayload?.order_pickup_instructions || pickupInstructions,
-      fields_relayed: {
-        order_special_instructions: true,
-        item_special_instructions: true,
-        item_special_requests: true,
-        promotions: true,
-        ...(partialPayload?.fields_relayed ?? {})
-      }
-    };
+    const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}/accept`);
 
     try {
-      await this.http.post(requestUrl, payload, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
+      const response = await this.http.post(
+        requestUrl,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
         }
-      });
+      );
 
       console.log(chalk.green(`✓ Pedido ${orderId} aceptado correctamente`));
+      return response.data ?? {};
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         this.logAxiosError(error, `Error al aceptar el pedido ${orderId}`, requestUrl);
@@ -264,22 +203,24 @@ export class UberApiService {
     }
   }
 
-  public async denyOrder(
-    orderId: string,
-    payload: UberDenyOrderPayload
-  ): Promise<void> {
+  public async denyOrder(orderId: string): Promise<unknown> {
     const token = await this.getAccessToken();
-    const requestUrl = this.buildUrl(`/v1/eats/orders/${orderId}/deny_pos_order`);
+    const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}/deny`);
 
     try {
-      await this.http.post(requestUrl, payload, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
+      const response = await this.http.post(
+        requestUrl,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
         }
-      });
+      );
 
       console.log(chalk.green(`✓ Pedido ${orderId} denegado correctamente`));
+      return response.data ?? {};
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         this.logAxiosError(error, `Error al denegar el pedido ${orderId}`, requestUrl);
@@ -294,7 +235,7 @@ export class UberApiService {
     payload: UberCancelOrderPayload
   ): Promise<unknown> {
     const token = await this.getAccessToken();
-    const requestUrl = this.buildUrl(`/v1/eats/orders/${orderId}/cancel`);
+    const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}/cancel`);
 
     try {
       const response = await this.http.post(requestUrl, payload, {
@@ -402,32 +343,30 @@ export class UberApiService {
           }
 
           case "accept": {
-            await this.acceptOrder(orderId, flow.accept_payload);
+            const response = await this.acceptOrder(orderId);
             results.push({
               action,
               ok: true,
-              detail: "Accept Order ejecutado correctamente"
+              detail: "Accept Order ejecutado correctamente",
+              response
             });
             break;
           }
 
           case "deny": {
-            if (!flow.deny_payload) {
-              throw new Error("deny_payload es requerido para ejecutar deny");
-            }
-
-            await this.denyOrder(orderId, flow.deny_payload);
+            const response = await this.denyOrder(orderId);
             results.push({
               action,
               ok: true,
-              detail: "Deny Order ejecutado correctamente"
+              detail: "Deny Order ejecutado correctamente",
+              response
             });
             break;
           }
 
           case "cancel": {
-            if (!flow.cancel_payload) {
-              throw new Error("cancel_payload es requerido para ejecutar cancel");
+            if (!flow.cancel_payload?.cancellation_reason) {
+              throw new Error("cancel_payload.cancellation_reason es requerido para ejecutar cancel");
             }
 
             const response = await this.cancelOrder(orderId, flow.cancel_payload);

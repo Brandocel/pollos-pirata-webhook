@@ -3,7 +3,6 @@ import chalk from "chalk";
 import {
   getUberApiService,
   UberCancelOrderPayload,
-  UberDenyOrderPayload,
   UberOrderValidationFlowPayload
 } from "../services/uberApi";
 
@@ -49,18 +48,39 @@ function resolveOrderId(req: Request, res: Response): string | null {
   return orderId;
 }
 
-function sendError(
-  res: Response,
-  defaultMessage: string,
-  error: unknown
-): void {
+function sendError(res: Response, defaultMessage: string, error: unknown): void {
   console.error(chalk.red(defaultMessage));
   console.error(chalk.red(error instanceof Error ? error.message : String(error)));
 
-  res.status(500).json({
+  const statusCode =
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    typeof (error as { statusCode?: unknown }).statusCode === "number"
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+
+  const details =
+    typeof error === "object" &&
+    error !== null &&
+    "details" in error
+      ? (error as { details?: unknown }).details
+      : null;
+
+  const requestUrl =
+    typeof error === "object" &&
+    error !== null &&
+    "requestUrl" in error &&
+    typeof (error as { requestUrl?: unknown }).requestUrl === "string"
+      ? (error as { requestUrl: string }).requestUrl
+      : null;
+
+  res.status(statusCode).json({
     ok: false,
     message: defaultMessage,
-    error: error instanceof Error ? error.message : "Error desconocido"
+    error: error instanceof Error ? error.message : "Error desconocido",
+    details,
+    request_url: requestUrl
   });
 }
 
@@ -147,13 +167,14 @@ export async function acceptOrderManually(req: Request, res: Response): Promise<
     const orderId = resolveOrderId(req, res);
     if (!orderId) return;
 
-    await getUberApiService().acceptOrder(orderId, req.body ?? undefined);
+    const result = await getUberApiService().acceptOrder(orderId);
 
     res.status(200).json({
       ok: true,
       message: "Pedido aceptado correctamente",
       data: {
-        order_id: orderId
+        order_id: orderId,
+        uber_response: result
       }
     });
   } catch (error: unknown) {
@@ -166,24 +187,14 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
     const orderId = resolveOrderId(req, res);
     if (!orderId) return;
 
-    const payload = req.body as UberDenyOrderPayload | undefined;
-
-    if (!payload?.reason?.explanation || !payload?.reason?.code) {
-      res.status(400).json({
-        ok: false,
-        message:
-          "El body es inválido. Debe incluir reason.explanation y reason.code"
-      });
-      return;
-    }
-
-    await getUberApiService().denyOrder(orderId, payload);
+    const result = await getUberApiService().denyOrder(orderId);
 
     res.status(200).json({
       ok: true,
       message: "Pedido denegado correctamente",
       data: {
-        order_id: orderId
+        order_id: orderId,
+        uber_response: result
       }
     });
   } catch (error: unknown) {
@@ -198,10 +209,10 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
 
     const payload = req.body as UberCancelOrderPayload | undefined;
 
-    if (!payload?.reason) {
+    if (!payload?.cancellation_reason) {
       res.status(400).json({
         ok: false,
-        message: "El body es inválido. Debe incluir reason"
+        message: "El body es inválido. Debe incluir cancellation_reason"
       });
       return;
     }
@@ -270,8 +281,6 @@ export async function runOrderValidationFlow(req: Request, res: Response): Promi
 
     const result = await getUberApiService().runValidationFlow(orderId, {
       actions,
-      accept_payload: body.accept_payload,
-      deny_payload: body.deny_payload,
       cancel_payload: body.cancel_payload,
       update_payload: body.update_payload
     });
