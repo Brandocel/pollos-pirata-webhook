@@ -181,3 +181,23 @@ export interface UberStoreIntegrationDetails {
   integration_enabled?: boolean;
   raw?: unknown;
 }
+export interface UberOpenTimePeriod {
+  start_time: string;
+  end_time: string;
+}
+
+export interface UberHolidayHour {
+  open_time_periods?: UberOpenTimePeriod[];
+}
+
+export interface UberHolidayHoursMap {
+  [date: string]: UberHolidayHour;
+}
+
+export interface UberUpdateHolidayHoursRequest {
+  holiday_hours: UberHolidayHoursMap;
+}
+
+export interface UberGetHolidayHoursResponse {
+  holiday_hours: UberHolidayHoursMap;
+}

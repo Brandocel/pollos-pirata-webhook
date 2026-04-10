@@ -5,6 +5,7 @@ import cors, { CorsOptions } from "cors";
 import webhookRoutes from "./routes/webhook.routes";
 import uberAuthRoutes from "./routes/uberAuth.routes";
 import uberIntegrationRoutes from "./routes/uberIntegration.routes";
+import uberStoreRoutes from "./routes/uberStore.routes";
 import publicRoutes from "./routes/public.routes";
 import { setupSwagger } from "./docs/swagger";
 
@@ -76,6 +77,7 @@ app.use(publicRoutes);
 app.use("/webhooks", webhookRoutes);
 app.use("/uber", uberAuthRoutes);
 app.use("/uber", uberIntegrationRoutes);
+app.use("/uber", uberStoreRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
@@ -118,6 +120,7 @@ app.listen(port, "0.0.0.0", () => {
   console.log(chalk.white(`Session: ${publicUrl}/uber/session`));
   console.log(chalk.white(`Stores: ${publicUrl}/uber/stores`));
   console.log(chalk.white(`Store Integration: ${publicUrl}/uber/stores/{storeId}/integration`));
+  console.log(chalk.white(`Store Holiday Hours: ${publicUrl}/uber/stores/{storeId}/holiday-hours`));
   console.log(chalk.white(`Webhook: ${publicUrl}/webhooks/uber/webhook`));
   console.log(chalk.white(`Allowed origins: ${allowedOrigins.join(", ") || "Todos"}`));
   console.log(chalk.green("Servidor iniciado correctamente"));
