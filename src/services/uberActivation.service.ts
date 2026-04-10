@@ -92,27 +92,8 @@ export class UberActivationService {
     return new UberApiRequestError(message, statusCode, responseData, "uber", requestUrl);
   }
 
-  private buildStorePosDataUrl(
-    storeId: string,
-    payload?: UberActivateStoreRequest | UberUpdateStoreIntegrationRequest
-  ): string {
-    const params = new URLSearchParams();
-
-    if (typeof payload?.is_order_manager === "boolean") {
-      params.append("is_order_manager", String(payload.is_order_manager));
-    }
-    if (typeof payload?.integrator_store_id === "string" && payload.integrator_store_id.trim()) {
-      params.append("integrator_store_id", payload.integrator_store_id.trim());
-    }
-    if (typeof payload?.integrator_brand_id === "string" && payload.integrator_brand_id.trim()) {
-      params.append("integrator_brand_id", payload.integrator_brand_id.trim());
-    }
-    if (typeof payload?.merchant_store_id === "string" && payload.merchant_store_id.trim()) {
-      params.append("merchant_store_id", payload.merchant_store_id.trim());
-    }
-
-    const queryString = params.toString();
-    return `${this.apiBaseUrl}/v1/eats/stores/${storeId}/pos_data${queryString ? `?${queryString}` : ""}`;
+  private buildStorePosDataUrl(storeId: string): string {
+    return `${this.apiBaseUrl}/v1/eats/stores/${storeId}/pos_data`;
   }
 
   private isObject(value: unknown): value is Record<string, unknown> {
@@ -161,11 +142,11 @@ export class UberActivationService {
 
     if (data.pos_integration_enabled !== true) warnings.push("pos_integration_enabled sigue en false");
     if (data.order_release_enabled !== true) warnings.push("order_release_enabled sigue en false");
-    if (typeof data.integrator_store_id !== "string" || !data.integrator_store_id.trim()) warnings.push("integrator_store_id vacío");
-    if (typeof data.integrator_brand_id !== "string" || !data.integrator_brand_id.trim()) warnings.push("integrator_brand_id vacío");
+    if (typeof data.integrator_store_id !== "string" || !data.integrator_store_id?.trim()) warnings.push("integrator_store_id vacío o null");
+    if (typeof data.integrator_brand_id !== "string" || !data.integrator_brand_id?.trim()) warnings.push("integrator_brand_id vacío o null");
 
     if (warnings.length === 0) {
-      console.log(chalk.green(`✓ Integración POS parece habilitada correctamente para store ${storeId}`));
+      console.log(chalk.green(`✓ Integración POS habilitada correctamente para store ${storeId}`));
       return;
     }
 
@@ -188,6 +169,7 @@ export class UberActivationService {
     params.append("redirect_uri", this.redirectUri);
     params.append("scope", "eats.pos_provisioning offline_access");
     params.append("state", state);
+
     return `${this.authBaseUrl}/oauth/v2/authorize?${params.toString()}`;
   }
 
@@ -233,7 +215,7 @@ export class UberActivationService {
     storeId: string,
     payload: UberActivateStoreRequest
   ): Promise<unknown> {
-    const requestUrl = this.buildStorePosDataUrl(storeId, payload);
+    const requestUrl = this.buildStorePosDataUrl(storeId);
 
     console.log(chalk.blue("========================================================"));
     console.log(chalk.blue("ACTIVATE STORE - REQUEST"));
@@ -243,65 +225,67 @@ export class UberActivationService {
     console.log(chalk.blue("========================================================"));
 
     // Estado previo
-    let beforeIntegrationRaw: unknown = null;
     try {
-      beforeIntegrationRaw = await this.fetchRawStoreIntegrationDetails(accessToken, storeId);
-      this.printIntegrationSnapshot("ESTADO ANTES DE ACTIVATE", storeId, beforeIntegrationRaw);
-    } catch (beforeError: unknown) {
+      const beforeRaw = await this.fetchRawStoreIntegrationDetails(accessToken, storeId);
+      this.printIntegrationSnapshot("ESTADO ANTES DE ACTIVATE", storeId, beforeRaw);
+    } catch {
       console.log(chalk.yellow(`⚠ No se pudo consultar estado previo para store ${storeId}`));
     }
 
-    // Activación con token del merchant
-    const response = await this.http.post(requestUrl, {}, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
+    // === ACTIVACIÓN CORRECTA SEGÚN DOCUMENTACIÓN OFICIAL ===
+    const activateBody = {
+      is_order_manager: payload.is_order_manager ?? true,
+      integrator_store_id: payload.integrator_store_id,
+      integrator_brand_id: payload.integrator_brand_id,
+      merchant_store_id: payload.merchant_store_id,
+      pos_integration_enabled: true
+    };
+
+    try {
+      const response = await this.http.post(requestUrl, activateBody, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      console.log(chalk.green(`✓ Store ${storeId} activada correctamente (POST con body)`));
+
+      // Forzado con token eats.store
+      try {
+        const integrationService = getUberIntegrationService();
+        await integrationService.updateStoreIntegration(storeId, activateBody);
+        console.log(chalk.green(`✓ Forzado update con eats.store scope`));
+      } catch {
+        console.warn(chalk.yellow("⚠ No se pudo forzar update con eats.store"));
       }
-    });
 
-    console.log(chalk.green(`✓ Store ${storeId} activada correctamente`));
-
-    // === FIX PRINCIPAL: Forzar actualización con eats.store scope ===
-    try {
-      const integrationService = getUberIntegrationService();
-      const updatePayload: UberUpdateStoreIntegrationRequest = {
-        is_order_manager: payload.is_order_manager,
-        integrator_store_id: payload.integrator_store_id,
-        integrator_brand_id: payload.integrator_brand_id,
-        merchant_store_id: payload.merchant_store_id
-      };
-
-      await integrationService.updateStoreIntegration(storeId, updatePayload);
-      console.log(chalk.green(`✓ Forzado update con eats.store scope (IDs y order_release)`));
-    } catch (updateError: unknown) {
-      console.warn(chalk.yellow("⚠ No se pudo forzar el update con eats.store (posiblemente necesites soporte de Uber)"));
-    }
-    // === FIN FIX ===
-
-    // Verificación final
-    try {
-      const afterIntegrationRaw = await this.fetchRawStoreIntegrationDetails(accessToken, storeId);
-      this.printIntegrationSnapshot("ESTADO DESPUÉS DE ACTIVATE", storeId, afterIntegrationRaw);
-      this.printActivationWarnings(storeId, afterIntegrationRaw);
+      // Verificación final
+      const afterRaw = await this.fetchRawStoreIntegrationDetails(accessToken, storeId);
+      this.printIntegrationSnapshot("ESTADO DESPUÉS DE ACTIVATE", storeId, afterRaw);
+      this.printActivationWarnings(storeId, afterRaw);
 
       return {
         activation_response: response.data ?? {},
-        verification: this.mapIntegrationDetails(storeId, afterIntegrationRaw)
+        verification: this.mapIntegrationDetails(storeId, afterRaw)
       };
-    } catch (afterError: unknown) {
-      console.log(chalk.yellow(`⚠ No se pudo verificar estado posterior para store ${storeId}`));
-      return {
-        activation_response: response.data ?? {},
-        verification: null
-      };
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw this.buildAxiosError(error, `No fue posible activar la store ${storeId}`, requestUrl);
+      }
+      throw new UberApiRequestError(`No fue posible activar la store ${storeId}`, 500, null, "server", requestUrl);
     }
   }
 
-  // Mantengo los métodos restantes tal como los tenías (solo eliminé duplicados innecesarios de logging)
-  public async getStoreIntegrationDetails(accessToken: string, storeId: string): Promise<UberStoreIntegrationDetails> {
+  public async getStoreIntegrationDetails(
+    accessToken: string,
+    storeId: string
+  ): Promise<UberStoreIntegrationDetails> {
     const requestUrl = this.buildStorePosDataUrl(storeId);
     try {
-      const response = await this.http.get(requestUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const response = await this.http.get(requestUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
       console.log(chalk.green(`✓ Detalles de integración obtenidos para store ${storeId}`));
       this.printIntegrationSnapshot("CONSULTA DE DETALLE DE INTEGRACIÓN", storeId, response.data);
       return this.mapIntegrationDetails(storeId, response.data);
@@ -316,10 +300,13 @@ export class UberActivationService {
     storeId: string,
     payload: UberUpdateStoreIntegrationRequest
   ): Promise<unknown> {
-    const requestUrl = this.buildStorePosDataUrl(storeId, payload);
+    const requestUrl = this.buildStorePosDataUrl(storeId);
     try {
-      const response = await this.http.put(requestUrl, {}, {
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
+      const response = await this.http.put(requestUrl, payload, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
       });
       console.log(chalk.green(`✓ Integración actualizada para store ${storeId}`));
       return response.data;
@@ -332,7 +319,9 @@ export class UberActivationService {
   public async removeStoreIntegration(accessToken: string, storeId: string): Promise<unknown> {
     const requestUrl = this.buildStorePosDataUrl(storeId);
     try {
-      const response = await this.http.delete(requestUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const response = await this.http.delete(requestUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
       console.log(chalk.green(`✓ Integración removida para store ${storeId}`));
       return response.data;
     } catch (error: unknown) {
