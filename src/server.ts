@@ -154,4 +154,12 @@ app.listen(port, "0.0.0.0", () => {
   console.log(chalk.white(`Webhook: ${publicUrl}/webhooks/uber/webhook`));
   console.log(chalk.white(`Allowed origins: ${allowedOrigins.join(", ") || "Todos"}`));
   console.log(chalk.green("Servidor iniciado correctamente"));
+  console.log(chalk.white(`Accept Order: ${publicUrl}/uber/orders/{orderId}/accept`));
+console.log(chalk.white(`Deny Order: ${publicUrl}/uber/orders/{orderId}/deny`));
+console.log(chalk.white(`Cancel Order: ${publicUrl}/uber/orders/{orderId}/cancel`));
+console.log(chalk.white(`Update Order Cart: ${publicUrl}/uber/orders/{orderId}/cart`));
+console.log(chalk.white(`Validate Flow: ${publicUrl}/uber/orders/{orderId}/validate-flow`));
+console.log(chalk.white(`Webhook Last State: ${publicUrl}/webhooks/uber/webhook/last-state`));
+console.log(chalk.white(`Webhook History: ${publicUrl}/webhooks/uber/webhook/history`));
+console.log(chalk.white(`Webhook Evidence: ${publicUrl}/webhooks/uber/webhook/evidence`));
 });

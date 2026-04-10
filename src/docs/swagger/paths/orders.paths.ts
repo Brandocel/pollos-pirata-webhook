@@ -28,12 +28,11 @@ export const ordersPaths = {
       }
     }
   },
+
   "/uber/stores/{storeId}/orders": {
     get: {
       tags: ["Orders"],
       summary: "Listar órdenes de una store de Uber Eats",
-      description:
-        "Endpoint temporal de diagnóstico para verificar si una compra sí fue creada aunque el webhook no se haya visto en logs.",
       parameters: [
         {
           name: "storeId",
@@ -50,8 +49,7 @@ export const ordersPaths = {
           required: false,
           schema: {
             type: "string"
-          },
-          description: "Filtro por estado de la orden"
+          }
         },
         {
           name: "status",
@@ -59,8 +57,7 @@ export const ordersPaths = {
           required: false,
           schema: {
             type: "string"
-          },
-          description: "Filtro por status de la orden"
+          }
         },
         {
           name: "start_time",
@@ -68,8 +65,7 @@ export const ordersPaths = {
           required: false,
           schema: {
             type: "string"
-          },
-          description: "RFC3339. Filtra órdenes desde esta fecha"
+          }
         },
         {
           name: "end_time",
@@ -77,8 +73,7 @@ export const ordersPaths = {
           required: false,
           schema: {
             type: "string"
-          },
-          description: "RFC3339. Filtra órdenes hasta esta fecha"
+          }
         },
         {
           name: "page_size",
@@ -86,8 +81,7 @@ export const ordersPaths = {
           required: false,
           schema: {
             type: "number"
-          },
-          description: "Cantidad de órdenes por página"
+          }
         },
         {
           name: "expand",
@@ -95,19 +89,208 @@ export const ordersPaths = {
           required: false,
           schema: {
             type: "string"
-          },
-          description: "Ejemplo: carts,payment"
+          }
         }
       ],
       responses: {
         "200": {
           description: "Órdenes de la store obtenidas correctamente"
-        },
-        "400": {
-          description: "Parámetros inválidos"
-        },
-        "500": {
-          description: "Error interno del servidor"
+        }
+      }
+    }
+  },
+
+  "/uber/orders/{orderId}/accept": {
+    post: {
+      tags: ["Orders"],
+      summary: "Aceptar pedido manualmente",
+      parameters: [
+        {
+          name: "orderId",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                reason: { type: "string" },
+                pickup_time: { type: "number" },
+                external_reference_id: { type: "string" },
+                order_pickup_instructions: { type: "string" }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        "200": {
+          description: "Pedido aceptado correctamente"
+        }
+      }
+    }
+  },
+
+  "/uber/orders/{orderId}/deny": {
+    post: {
+      tags: ["Orders"],
+      summary: "Denegar pedido manualmente",
+      parameters: [
+        {
+          name: "orderId",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["reason"],
+              properties: {
+                reason: {
+                  type: "object",
+                  required: ["explanation", "code"],
+                  properties: {
+                    explanation: { type: "string" },
+                    code: { type: "string" },
+                    out_of_stock_items: {
+                      type: "array",
+                      items: { type: "string" }
+                    },
+                    invalid_items: {
+                      type: "array",
+                      items: { type: "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        "200": {
+          description: "Pedido denegado correctamente"
+        }
+      }
+    }
+  },
+
+  "/uber/orders/{orderId}/cancel": {
+    post: {
+      tags: ["Orders"],
+      summary: "Cancelar pedido manualmente",
+      parameters: [
+        {
+          name: "orderId",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["reason"],
+              properties: {
+                reason: { type: "string" },
+                details: { type: "string" },
+                cancelling_party: { type: "string" }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        "200": {
+          description: "Pedido cancelado correctamente"
+        }
+      }
+    }
+  },
+
+  "/uber/orders/{orderId}/cart": {
+    patch: {
+      tags: ["Orders"],
+      summary: "Actualizar pedido/cart",
+      description: "Pasa el payload de patch cart tal cual hacia Uber.",
+      parameters: [
+        {
+          name: "orderId",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object"
+            }
+          }
+        }
+      },
+      responses: {
+        "200": {
+          description: "Pedido actualizado correctamente"
+        }
+      }
+    }
+  },
+
+  "/uber/orders/{orderId}/validate-flow": {
+    post: {
+      tags: ["Orders"],
+      summary: "Ejecutar flujo de validación de Uber por pedido",
+      parameters: [
+        {
+          name: "orderId",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["actions"],
+              properties: {
+                actions: {
+                  type: "array",
+                  items: {
+                    type: "string",
+                    enum: ["get", "accept", "deny", "cancel", "update"]
+                  }
+                },
+                accept_payload: { type: "object" },
+                deny_payload: { type: "object" },
+                cancel_payload: { type: "object" },
+                update_payload: { type: "object" }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        "200": {
+          description: "Flujo de validación ejecutado"
         }
       }
     }

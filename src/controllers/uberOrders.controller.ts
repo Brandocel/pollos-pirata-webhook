@@ -1,6 +1,11 @@
 import { Request, Response } from "express";
 import chalk from "chalk";
-import { getUberApiService } from "../services/uberApi";
+import {
+  getUberApiService,
+  UberCancelOrderPayload,
+  UberDenyOrderPayload,
+  UberOrderValidationFlowPayload
+} from "../services/uberApi";
 
 function getSingleString(value: unknown): string | null {
   if (typeof value === "string") {
@@ -22,25 +27,61 @@ function looksLikeUuid(value: string): boolean {
   );
 }
 
+function resolveOrderId(req: Request, res: Response): string | null {
+  const orderId = getSingleString(req.params.orderId);
+
+  if (!orderId) {
+    res.status(400).json({
+      ok: false,
+      message: "orderId es requerido"
+    });
+    return null;
+  }
+
+  if (!looksLikeUuid(orderId)) {
+    res.status(400).json({
+      ok: false,
+      message: "orderId debe tener formato UUID válido"
+    });
+    return null;
+  }
+
+  return orderId;
+}
+
+function sendError(
+  res: Response,
+  defaultMessage: string,
+  error: unknown
+): void {
+  console.error(chalk.red(defaultMessage));
+  console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+
+  res.status(500).json({
+    ok: false,
+    message: defaultMessage,
+    error: error instanceof Error ? error.message : "Error desconocido"
+  });
+}
+
+function normalizeActions(value: unknown): Array<"get" | "accept" | "deny" | "cancel" | "update"> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item) =>
+    item === "get" ||
+    item === "accept" ||
+    item === "deny" ||
+    item === "cancel" ||
+    item === "update"
+  ) as Array<"get" | "accept" | "deny" | "cancel" | "update">;
+}
+
 export async function getOrderDetails(req: Request, res: Response): Promise<void> {
   try {
-    const orderId = getSingleString(req.params.orderId);
-
-    if (!orderId) {
-      res.status(400).json({
-        ok: false,
-        message: "orderId es requerido"
-      });
-      return;
-    }
-
-    if (!looksLikeUuid(orderId)) {
-      res.status(400).json({
-        ok: false,
-        message: "orderId debe tener formato UUID válido"
-      });
-      return;
-    }
+    const orderId = resolveOrderId(req, res);
+    if (!orderId) return;
 
     const uberApiService = getUberApiService();
     const order = await uberApiService.getOrderDetails(orderId);
@@ -53,13 +94,7 @@ export async function getOrderDetails(req: Request, res: Response): Promise<void
       data: order
     });
   } catch (error: unknown) {
-    console.error(chalk.red("Error en getOrderDetails:"));
-    console.error(chalk.red(error instanceof Error ? error.message : String(error)));
-
-    res.status(500).json({
-      ok: false,
-      message: "No fue posible obtener el detalle de la orden"
-    });
+    sendError(res, "No fue posible obtener el detalle de la orden", error);
   }
 }
 
@@ -103,12 +138,150 @@ export async function listStoreOrders(req: Request, res: Response): Promise<void
       data: result
     });
   } catch (error: unknown) {
-    console.error(chalk.red("Error en listStoreOrders:"));
-    console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+    sendError(res, "No fue posible obtener las órdenes de la store", error);
+  }
+}
 
-    res.status(500).json({
-      ok: false,
-      message: "No fue posible obtener las órdenes de la store"
+export async function acceptOrderManually(req: Request, res: Response): Promise<void> {
+  try {
+    const orderId = resolveOrderId(req, res);
+    if (!orderId) return;
+
+    await getUberApiService().acceptOrder(orderId, req.body ?? undefined);
+
+    res.status(200).json({
+      ok: true,
+      message: "Pedido aceptado correctamente",
+      data: {
+        order_id: orderId
+      }
     });
+  } catch (error: unknown) {
+    sendError(res, "No fue posible aceptar el pedido", error);
+  }
+}
+
+export async function denyOrderManually(req: Request, res: Response): Promise<void> {
+  try {
+    const orderId = resolveOrderId(req, res);
+    if (!orderId) return;
+
+    const payload = req.body as UberDenyOrderPayload | undefined;
+
+    if (!payload?.reason?.explanation || !payload?.reason?.code) {
+      res.status(400).json({
+        ok: false,
+        message:
+          "El body es inválido. Debe incluir reason.explanation y reason.code"
+      });
+      return;
+    }
+
+    await getUberApiService().denyOrder(orderId, payload);
+
+    res.status(200).json({
+      ok: true,
+      message: "Pedido denegado correctamente",
+      data: {
+        order_id: orderId
+      }
+    });
+  } catch (error: unknown) {
+    sendError(res, "No fue posible denegar el pedido", error);
+  }
+}
+
+export async function cancelOrderManually(req: Request, res: Response): Promise<void> {
+  try {
+    const orderId = resolveOrderId(req, res);
+    if (!orderId) return;
+
+    const payload = req.body as UberCancelOrderPayload | undefined;
+
+    if (!payload?.reason) {
+      res.status(400).json({
+        ok: false,
+        message: "El body es inválido. Debe incluir reason"
+      });
+      return;
+    }
+
+    const result = await getUberApiService().cancelOrder(orderId, payload);
+
+    res.status(200).json({
+      ok: true,
+      message: "Pedido cancelado correctamente",
+      data: {
+        order_id: orderId,
+        uber_response: result
+      }
+    });
+  } catch (error: unknown) {
+    sendError(res, "No fue posible cancelar el pedido", error);
+  }
+}
+
+export async function updateOrderManually(req: Request, res: Response): Promise<void> {
+  try {
+    const orderId = resolveOrderId(req, res);
+    if (!orderId) return;
+
+    const payload = req.body as Record<string, unknown> | undefined;
+
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      res.status(400).json({
+        ok: false,
+        message: "El body del update debe ser un objeto JSON válido"
+      });
+      return;
+    }
+
+    const result = await getUberApiService().updateOrderCart(orderId, payload);
+
+    res.status(200).json({
+      ok: true,
+      message: "Pedido actualizado correctamente",
+      data: {
+        order_id: orderId,
+        uber_response: result
+      }
+    });
+  } catch (error: unknown) {
+    sendError(res, "No fue posible actualizar el pedido", error);
+  }
+}
+
+export async function runOrderValidationFlow(req: Request, res: Response): Promise<void> {
+  try {
+    const orderId = resolveOrderId(req, res);
+    if (!orderId) return;
+
+    const body = (req.body ?? {}) as Partial<UberOrderValidationFlowPayload>;
+    const actions = normalizeActions(body.actions);
+
+    if (actions.length === 0) {
+      res.status(400).json({
+        ok: false,
+        message:
+          "Debes enviar actions con al menos una acción válida: get, accept, deny, cancel, update"
+      });
+      return;
+    }
+
+    const result = await getUberApiService().runValidationFlow(orderId, {
+      actions,
+      accept_payload: body.accept_payload,
+      deny_payload: body.deny_payload,
+      cancel_payload: body.cancel_payload,
+      update_payload: body.update_payload
+    });
+
+    res.status(200).json({
+      ok: true,
+      message: "Flujo de validación ejecutado",
+      data: result
+    });
+  } catch (error: unknown) {
+    sendError(res, "No fue posible ejecutar el flujo de validación", error);
   }
 }
