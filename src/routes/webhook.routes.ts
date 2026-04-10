@@ -1,12 +1,15 @@
 import { Router } from "express";
-import {
-  getOrderDetailsManually,
-  handleUberWebhook
-} from "../controllers/webhook.controller";
+import { handleUberWebhook } from "../controllers/webhook.controller";
 
 const router = Router();
 
+router.get("/uber/webhook", (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    message: "Webhook endpoint activo. Usa POST para enviar eventos."
+  });
+});
+
 router.post("/uber/webhook", handleUberWebhook);
-router.get("/uber/orders/:orderId", getOrderDetailsManually);
 
 export default router;

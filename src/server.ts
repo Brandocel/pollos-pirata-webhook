@@ -62,6 +62,7 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
+// ====================== RAW BODY SOLO PARA WEBHOOKS ======================
 app.use(
   "/webhooks",
   express.raw({
@@ -69,6 +70,27 @@ app.use(
     limit: "2mb"
   })
 );
+
+// ====================== LOG DE DIAGNÓSTICO PARA WEBHOOKS ======================
+app.use("/webhooks", (req: Request, _res: Response, next: NextFunction) => {
+  console.log(chalk.yellow("========================================================"));
+  console.log(chalk.yellow(" REQUEST ENTRANTE A /webhooks"));
+  console.log(chalk.yellow(` Método: ${req.method}`));
+  console.log(chalk.yellow(` URL: ${req.originalUrl}`));
+  console.log(chalk.yellow(` Content-Type: ${req.header("content-type") ?? "N/A"}`));
+  console.log(
+    chalk.yellow(` X-Uber-Signature: ${req.header("X-Uber-Signature") ? "Sí" : "No"}`)
+  );
+
+  if (Buffer.isBuffer(req.body)) {
+    console.log(chalk.yellow(` Raw body length: ${req.body.length}`));
+  } else {
+    console.log(chalk.yellow(" Raw body length: body no es Buffer"));
+  }
+
+  console.log(chalk.yellow("========================================================"));
+  next();
+});
 
 app.use(express.json({ limit: "8mb" }));
 app.use(express.urlencoded({ extended: true, limit: "8mb" }));
