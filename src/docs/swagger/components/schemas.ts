@@ -150,5 +150,59 @@ export const schemas = {
           }
         }
       }
+    },
+
+    UberMenuConfiguration: {
+      type: "object",
+      required: ["menus", "categories", "items", "modifier_groups"],
+      properties: {
+        menu_type: {
+          type: "string",
+          enum: [
+            "MENU_TYPE_FULFILLMENT_DELIVERY",
+            "MENU_TYPE_FULFILLMENT_PICK_UP",
+            "MENU_TYPE_FULFILLMENT_DINE_IN"
+          ],
+          example: "MENU_TYPE_FULFILLMENT_DELIVERY"
+        },
+        menus: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: true
+          }
+        },
+        categories: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: true
+          }
+        },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: true
+          }
+        },
+        modifier_groups: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: true
+          }
+        }
+      }
+    },
+  
+    UberUpdateMenuItemRequest: {
+      type: "object",
+      additionalProperties: true,
+      example: {
+        price_info: {
+          price: 149900
+        }
+      }
     }
   };

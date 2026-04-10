@@ -190,6 +190,23 @@ export interface UberHolidayHour {
   open_time_periods?: UberOpenTimePeriod[];
 }
 
+export interface UberUpdateHolidayHoursRequest {
+  holiday_hours: UberHolidayHoursMap;
+}
+
+export interface UberGetHolidayHoursResponse {
+  holiday_hours: UberHolidayHoursMap;
+}
+
+export interface UberOpenTimePeriod {
+  start_time: string;
+  end_time: string;
+}
+
+export interface UberHolidayHour {
+  open_time_periods?: UberOpenTimePeriod[];
+}
+
 export interface UberHolidayHoursMap {
   [date: string]: UberHolidayHour;
 }
@@ -200,4 +217,25 @@ export interface UberUpdateHolidayHoursRequest {
 
 export interface UberGetHolidayHoursResponse {
   holiday_hours: UberHolidayHoursMap;
+}
+
+export type UberMenuType =
+  | "MENU_TYPE_FULFILLMENT_DELIVERY"
+  | "MENU_TYPE_FULFILLMENT_PICK_UP"
+  | "MENU_TYPE_FULFILLMENT_DINE_IN";
+
+export interface UberMenuConfiguration {
+  menus: Record<string, unknown>[];
+  categories: Record<string, unknown>[];
+  items: Record<string, unknown>[];
+  modifier_groups: Record<string, unknown>[];
+  menu_type?: UberMenuType;
+}
+
+export type UberGetMenuResponse = UberMenuConfiguration;
+
+export interface UberUpdateMenuItemRequest extends Record<string, unknown> {
+  price_info?: Record<string, unknown>;
+  suspension_info?: Record<string, unknown>;
+  tax_info?: Record<string, unknown>;
 }

@@ -87,7 +87,7 @@ function isValidDate(value: string): boolean {
 }
 
 function isValidTime(value: unknown): value is string {
-  return typeof value === "string" && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
+  return typeof value === "string" && /^([01]?\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 function normalizeOpenTimePeriods(value: unknown): UberOpenTimePeriod[] | null {
