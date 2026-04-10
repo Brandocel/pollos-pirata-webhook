@@ -21,7 +21,7 @@ export const swaggerTags = [
   },
   {
     name: "Orders",
-    description: "Consulta manual de pedidos"
+    description: "Operaciones de órdenes como consulta de detalle, aceptación y cambios de estado"
   },
   {
     name: "Webhooks",
