@@ -27,6 +27,31 @@ function getSingleString(value: unknown): string | null {
   return null;
 }
 
+function looksLikeUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
+}
+
+function extractOrderIdFromResourceHref(resourceHref?: string | null): string | null {
+  if (!resourceHref || typeof resourceHref !== "string") {
+    return null;
+  }
+
+  /**
+   * Compatible con rutas tipo:
+   * - /v1/delivery/order/{order_id}
+   * - /v2/eats/order/{order_id}
+   * - cualquier variante que contenga /order/{id}
+   */
+  const match = resourceHref.match(/\/order\/([^/?#]+)/i);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return match[1].trim() || null;
+}
+
 function formatMoney(formatted?: string, amount?: number, currency?: string): string {
   if (formatted) {
     return formatted;
@@ -179,6 +204,116 @@ function verifyWithAnySigningKey(rawBody: Buffer, signatureHeader: string): bool
   return false;
 }
 
+function getEventStoreId(payload: UberWebhookEvent): string | null {
+  return getSingleString(payload.meta?.user_id);
+}
+
+function getEventOrderId(payload: UberWebhookEvent): string | null {
+  const resourceId = getSingleString(payload.meta?.resource_id);
+  if (resourceId) {
+    return resourceId;
+  }
+
+  return extractOrderIdFromResourceHref(getSingleString(payload.resource_href));
+}
+
+async function processOrdersNotification(payload: UberWebhookEvent): Promise<void> {
+  const orderId = getEventOrderId(payload);
+  const storeId = getEventStoreId(payload);
+
+  console.log(chalk.gray("--------- PROCESANDO orders.notification ---------"));
+  console.log(chalk.gray(`event_id: ${payload.event_id || "N/A"}`));
+  console.log(chalk.gray(`event_type: ${payload.event_type || "N/A"}`));
+  console.log(chalk.gray(`store_id(meta.user_id): ${storeId || "N/A"}`));
+  console.log(chalk.gray(`resource_id(meta.resource_id): ${payload.meta?.resource_id || "N/A"}`));
+  console.log(chalk.gray(`resource_href: ${payload.resource_href || "N/A"}`));
+  console.log(chalk.gray(`order_id resuelto: ${orderId || "N/A"}`));
+  console.log(chalk.gray("--------------------------------------------------"));
+
+  if (!orderId) {
+    console.error(chalk.red("No se encontró order_id en el webhook"));
+    return;
+  }
+
+  if (!looksLikeUuid(orderId)) {
+    console.error(
+      chalk.red(`El order_id recibido no tiene formato UUID válido: ${orderId}`)
+    );
+    console.log(
+      chalk.yellow(
+        "Esto suele ocurrir en pruebas manuales con payload inventado. Uber real envía resource_id UUID."
+      )
+    );
+    return;
+  }
+
+  console.log(chalk.blue(`Obteniendo detalles del pedido → ${orderId}`));
+
+  const uberApiService = getUberApiService();
+  const order = await uberApiService.getOrderDetails(orderId);
+
+  printOrderSummary(order);
+
+  const autoAccept = process.env.AUTO_ACCEPT_ORDERS === "true";
+
+  if (autoAccept) {
+    console.log(chalk.green("Auto-aceptando pedido..."));
+    await uberApiService.acceptOrder(orderId);
+    console.log(chalk.green("✅ Pedido aceptado automáticamente"));
+  } else {
+    console.log(
+      chalk.yellow("AUTO_ACCEPT_ORDERS=false → Pedido queda pendiente de aceptación manual")
+    );
+  }
+}
+
+async function processOrdersFailure(payload: UberWebhookEvent): Promise<void> {
+  console.log(chalk.red("--------- EVENTO orders.failure ---------"));
+  console.log(chalk.red(`event_id: ${payload.event_id || "N/A"}`));
+  console.log(chalk.red(`resource_id: ${payload.meta?.resource_id || "N/A"}`));
+  console.log(chalk.red(`store_id: ${payload.meta?.user_id || "N/A"}`));
+  console.log(chalk.red(`resource_href: ${payload.resource_href || "N/A"}`));
+  console.log(chalk.red("----------------------------------------"));
+}
+
+async function processDeliveryStateChanged(payload: UberWebhookEvent): Promise<void> {
+  console.log(chalk.cyan("------ EVENTO delivery.state_changed ------"));
+  console.log(chalk.cyan(`event_id: ${payload.event_id || "N/A"}`));
+  console.log(chalk.cyan(`resource_id: ${payload.meta?.resource_id || "N/A"}`));
+  console.log(chalk.cyan(`store_id: ${payload.meta?.user_id || "N/A"}`));
+  console.log(chalk.cyan(`resource_href: ${payload.resource_href || "N/A"}`));
+  console.log(chalk.cyan("------------------------------------------"));
+}
+
+async function processOtherWebhookEvent(payload: UberWebhookEvent): Promise<void> {
+  switch (payload.event_type) {
+    case "orders.notification":
+      await processOrdersNotification(payload);
+      return;
+
+    case "orders.failure":
+      await processOrdersFailure(payload);
+      return;
+
+    case "delivery.state_changed":
+      await processDeliveryStateChanged(payload);
+      return;
+
+    case "orders.scheduled.notification":
+    case "orders.release":
+    case "orders.fulfillment_issues.resolved":
+      console.log(chalk.yellow(`Evento recibido pero no procesado todavía: ${payload.event_type}`));
+      console.log(chalk.yellow(`resource_id: ${payload.meta?.resource_id || "N/A"}`));
+      console.log(chalk.yellow(`resource_href: ${payload.resource_href || "N/A"}`));
+      return;
+
+    default:
+      console.log(chalk.yellow(`Evento ignorado/no reconocido: ${payload.event_type}`));
+      console.log(chalk.yellow(`Payload: ${JSON.stringify(payload, null, 2)}`));
+      return;
+  }
+}
+
 // ====================== WEBHOOK PRINCIPAL ======================
 export async function handleUberWebhook(req: Request, res: Response): Promise<void> {
   const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
@@ -188,15 +323,20 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
   console.log(chalk.blue("Webhook de Uber recibido"));
   console.log(chalk.blue(`Timestamp: ${new Date().toISOString()}`));
   console.log(chalk.blue(`URL: ${req.originalUrl}`));
+  console.log(chalk.blue(`Method: ${req.method}`));
   console.log(chalk.blue(`Content-Type: ${req.header("content-type") ?? "N/A"}`));
   console.log(chalk.blue(`X-Uber-Signature presente: ${signatureHeader ? "Sí" : "No"}`));
   console.log(chalk.blue(`Raw body length: ${rawBody.length}`));
   console.log(chalk.blue("=============================================="));
 
-  let signatureValid = true;
+  if (rawBody.length === 0) {
+    console.log(chalk.yellow("Webhook recibido con body vacío"));
+    res.status(200).end();
+    return;
+  }
 
   if (signatureHeader && signatureHeader.trim() !== "") {
-    signatureValid = verifyWithAnySigningKey(rawBody, signatureHeader);
+    const signatureValid = verifyWithAnySigningKey(rawBody, signatureHeader);
 
     if (!signatureValid) {
       console.error(chalk.red("Firma HMAC-SHA256 inválida"));
@@ -205,7 +345,6 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
           "Revisa que UBER_WEBHOOK_SIGNING_KEY coincida exactamente con el Signing Key del dashboard"
         )
       );
-
       res.status(200).end();
       return;
     }
@@ -229,6 +368,10 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
   console.log(chalk.magenta("Payload completo del webhook:"));
   console.log(JSON.stringify(payload, null, 2));
 
+  /**
+   * Uber espera confirmación rápida del webhook.
+   * Respondemos 200 primero y luego procesamos asíncronamente.
+   */
   res.status(200).end();
 
   void (async () => {
@@ -239,41 +382,7 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
         )
       );
 
-      if (payload.event_type !== "orders.notification") {
-        console.log(chalk.yellow(`Evento ignorado: ${payload.event_type}`));
-        return;
-      }
-
-      let orderId = getSingleString(payload.meta?.resource_id);
-
-      if (!orderId && payload.resource_href) {
-        const match = payload.resource_href.match(/\/order\/([^/?]+)/i);
-        orderId = match ? match[1] : null;
-      }
-
-      if (!orderId) {
-        console.error(chalk.red("No se encontró order_id en el webhook"));
-        return;
-      }
-
-      console.log(chalk.blue(`Obteniendo detalles del pedido → ${orderId}`));
-
-      const uberApiService = getUberApiService();
-      const order = await uberApiService.getOrderDetails(orderId);
-
-      printOrderSummary(order);
-
-      const autoAccept = process.env.AUTO_ACCEPT_ORDERS === "true";
-
-      if (autoAccept) {
-        console.log(chalk.green("Auto-aceptando pedido..."));
-        await uberApiService.acceptOrder(orderId);
-        console.log(chalk.green("✅ Pedido aceptado automáticamente"));
-      } else {
-        console.log(
-          chalk.yellow("AUTO_ACCEPT_ORDERS=false → Pedido queda pendiente de aceptación manual")
-        );
-      }
+      await processOtherWebhookEvent(payload);
     } catch (error: unknown) {
       console.error(chalk.red("Error procesando el webhook:"));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
@@ -290,6 +399,14 @@ export async function getOrderDetailsManually(req: Request, res: Response): Prom
       res.status(400).json({
         ok: false,
         message: "orderId es requerido"
+      });
+      return;
+    }
+
+    if (!looksLikeUuid(orderId)) {
+      res.status(400).json({
+        ok: false,
+        message: "orderId debe tener formato UUID válido"
       });
       return;
     }

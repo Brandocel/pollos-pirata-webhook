@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosError, AxiosInstance } from "axios";
 import chalk from "chalk";
 import { UberOrderDetails } from "../types/uber";
 
@@ -10,14 +10,10 @@ interface UberTokenResponse {
 }
 
 interface AcceptOrderPayload {
-  reason: string;
+  ready_for_pickup_time?: string;
   external_reference_id?: string;
+  accepted_by?: string;
   order_pickup_instructions?: string;
-  pickup_time?: number;
-  fields_relayed?: {
-    order_special_instructions?: boolean;
-    promotions?: boolean;
-  };
 }
 
 export class UberApiService {
@@ -58,6 +54,18 @@ export class UberApiService {
     });
   }
 
+  private buildUrl(path: string): string {
+    return `${this.apiBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  }
+
+  private logAxiosError(error: AxiosError, fallbackMessage: string): void {
+    console.error(chalk.red(fallbackMessage));
+    console.error(chalk.red(`Status: ${error.response?.status ?? "N/A"}`));
+    console.error(
+      chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`)
+    );
+  }
+
   private async getAccessToken(): Promise<string> {
     const now = Date.now();
 
@@ -69,7 +77,7 @@ export class UberApiService {
     form.append("client_id", this.clientId);
     form.append("client_secret", this.clientSecret);
     form.append("grant_type", "client_credentials");
-    form.append("scope", "eats.store eats.order");
+    form.append("scope", "eats.order");
 
     try {
       const response = await this.http.post<UberTokenResponse>(
@@ -84,87 +92,132 @@ export class UberApiService {
 
       const tokenData = response.data;
       this.accessToken = tokenData.access_token;
-      this.accessTokenExpiresAt = Date.now() + Math.max(tokenData.expires_in - 60, 60) * 1000;
+      this.accessTokenExpiresAt =
+        Date.now() + Math.max(tokenData.expires_in - 60, 60) * 1000;
 
       console.log(chalk.green("✓ Token OAuth app-level de Uber obtenido correctamente"));
+      console.log(chalk.green(`✓ Scope devuelto: ${tokenData.scope ?? "N/A"}`));
 
       return this.accessToken;
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
-        console.error(chalk.red("Error obteniendo token OAuth de Uber"));
-        console.error(chalk.red(`Status: ${error.response?.status ?? "N/A"}`));
-        console.error(
-          chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`)
-        );
+        this.logAxiosError(error, "Error obteniendo token OAuth de Uber");
       }
 
       throw new Error("No fue posible obtener el token OAuth de Uber");
     }
   }
 
+  /**
+   * Según el OpenAPI de Order Fulfillment:
+   * GET /v1/delivery/order/{order_id}
+   * Scope: eats.order
+   */
   public async getOrderDetails(orderId: string): Promise<UberOrderDetails> {
     const token = await this.getAccessToken();
+    const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}`);
 
     try {
-      const response = await this.http.get<UberOrderDetails>(
-        `${this.apiBaseUrl}/v2/eats/order/${orderId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
+      const response = await this.http.get<UberOrderDetails>(requestUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        params: {
+          expand: "carts,payment"
         }
-      );
+      });
 
+      console.log(chalk.green(`✓ Detalle de orden obtenido correctamente para ${orderId}`));
       return response.data;
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
-        console.error(chalk.red(`Error al consultar el pedido ${orderId} en Uber`));
-        console.error(chalk.red(`Status: ${error.response?.status ?? "N/A"}`));
-        console.error(
-          chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`)
-        );
+        this.logAxiosError(error, `Error al consultar el pedido ${orderId} en Uber`);
       }
 
       throw new Error(`No fue posible obtener el detalle del pedido ${orderId}`);
     }
   }
 
+  /**
+   * Según el OpenAPI de Order Fulfillment:
+   * POST /v1/delivery/order/{order_id}/accept
+   * Scope: eats.order
+   */
   public async acceptOrder(orderId: string): Promise<void> {
     const token = await this.getAccessToken();
+    const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}/accept`);
+
+    const acceptedBy = process.env.UBER_ACCEPTED_BY?.trim() || "Pollos Pirata";
+    const pickupInstructions =
+      process.env.UBER_PICKUP_INSTRUCTIONS?.trim() ||
+      "Pedido confirmado por Pollos Pirata";
 
     const payload: AcceptOrderPayload = {
-      reason: "Pedido aceptado automáticamente por Pollos Pirata",
       external_reference_id: `POLLOS-PIRATA-${orderId.slice(0, 8)}`,
-      order_pickup_instructions: "Pedido confirmado por Pollos Pirata",
-      fields_relayed: {
-        order_special_instructions: true,
-        promotions: true
-      }
+      accepted_by: acceptedBy,
+      order_pickup_instructions: pickupInstructions
     };
 
     try {
-      await this.http.post(
-        `${this.apiBaseUrl}/v1/eats/orders/${orderId}/accept_pos_order`,
-        payload,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          }
+      await this.http.post(requestUrl, payload, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
         }
-      );
+      });
 
-      console.log(chalk.green(`✓ Pedido ${orderId} aceptado automáticamente`));
+      console.log(chalk.green(`✓ Pedido ${orderId} aceptado correctamente`));
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
-        console.error(chalk.red(`Error al aceptar el pedido ${orderId}`));
-        console.error(chalk.red(`Status: ${error.response?.status ?? "N/A"}`));
-        console.error(
-          chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`)
-        );
+        this.logAxiosError(error, `Error al aceptar el pedido ${orderId}`);
       }
 
       throw new Error(`No fue posible aceptar el pedido ${orderId}`);
+    }
+  }
+
+  /**
+   * Útil para depuración si quieres revisar si la orden existe por tienda
+   * según el mismo OpenAPI:
+   * GET /v1/delivery/store/{store_id}/orders
+   */
+  public async listStoreOrders(
+    storeId: string,
+    params?: {
+      state?: string;
+      status?: string;
+      start_time?: string;
+      end_time?: string;
+      page_size?: number;
+      expand?: string;
+    }
+  ): Promise<unknown> {
+    const token = await this.getAccessToken();
+    const requestUrl = this.buildUrl(`/v1/delivery/store/${storeId}/orders`);
+
+    try {
+      const response = await this.http.get(requestUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        params: {
+          expand: params?.expand ?? "carts,payment",
+          state: params?.state,
+          status: params?.status,
+          start_time: params?.start_time,
+          end_time: params?.end_time,
+          page_size: params?.page_size ?? 20
+        }
+      });
+
+      console.log(chalk.green(`✓ Lista de órdenes obtenida correctamente para store ${storeId}`));
+      return response.data;
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        this.logAxiosError(error, `Error al listar órdenes de la store ${storeId}`);
+      }
+
+      throw new Error(`No fue posible listar las órdenes de la store ${storeId}`);
     }
   }
 }
