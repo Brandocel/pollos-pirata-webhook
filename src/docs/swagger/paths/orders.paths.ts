@@ -156,7 +156,7 @@ export const ordersPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["deny_reason"],
+              required: ["deny_reason", "info"],
               properties: {
                 deny_reason: {
                   type: "object",
@@ -171,12 +171,25 @@ export const ordersPaths = {
                       example: "Store is unable to fulfill the order"
                     }
                   }
+                },
+                info: {
+                  type: "object",
+                  required: ["description"],
+                  properties: {
+                    description: {
+                      type: "string",
+                      example: "Store is unable to fulfill the order"
+                    }
+                  }
                 }
               }
             },
             example: {
               deny_reason: {
                 code: "OTHER",
+                description: "Store is unable to fulfill the order"
+              },
+              info: {
                 description: "Store is unable to fulfill the order"
               }
             }
@@ -311,6 +324,7 @@ export const ordersPaths = {
                 },
                 deny_payload: {
                   type: "object",
+                  required: ["deny_reason", "info"],
                   properties: {
                     deny_reason: {
                       type: "object",
@@ -320,6 +334,16 @@ export const ordersPaths = {
                           type: "string",
                           example: "OTHER"
                         },
+                        description: {
+                          type: "string",
+                          example: "Store is unable to fulfill the order"
+                        }
+                      }
+                    },
+                    info: {
+                      type: "object",
+                      required: ["description"],
+                      properties: {
                         description: {
                           type: "string",
                           example: "Store is unable to fulfill the order"
@@ -357,6 +381,9 @@ export const ordersPaths = {
               deny_payload: {
                 deny_reason: {
                   code: "OTHER",
+                  description: "Store is unable to fulfill the order"
+                },
+                info: {
                   description: "Store is unable to fulfill the order"
                 }
               },

@@ -9,6 +9,9 @@ export interface UberDenyOrderPayload {
     code: string;
     description?: string;
   };
+  info: {
+    description: string;
+  };
 }
 
 export interface UberCancelOrderPayload {
@@ -251,11 +254,6 @@ export class UberOrdersService {
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
       console.log(chalk.cyan("payload deny hacia Uber:"));
       console.log(JSON.stringify(payload, null, 2));
-      console.log(chalk.cyan(`typeof payload.deny_reason: ${typeof payload.deny_reason}`));
-      console.log(chalk.cyan(`deny_reason.code: ${payload.deny_reason?.code ?? "N/A"}`));
-      console.log(
-        chalk.cyan(`deny_reason.description: ${payload.deny_reason?.description ?? "N/A"}`)
-      );
 
       const response = await this.http.post(
         requestUrl,
@@ -303,19 +301,6 @@ export class UberOrdersService {
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
       console.log(chalk.cyan("payload cancel hacia Uber:"));
       console.log(JSON.stringify(payload, null, 2));
-      console.log(
-        chalk.cyan(`typeof payload.cancellation_reason: ${typeof payload.cancellation_reason}`)
-      );
-      console.log(
-        chalk.cyan(
-          `cancellation_reason.code: ${payload.cancellation_reason?.code ?? "N/A"}`
-        )
-      );
-      console.log(
-        chalk.cyan(
-          `cancellation_reason.description: ${payload.cancellation_reason?.description ?? "N/A"}`
-        )
-      );
 
       const response = await this.http.post(
         requestUrl,
@@ -427,6 +412,10 @@ export class UberOrdersService {
             throw new Error("deny_payload.deny_reason.code es requerido para action=deny");
           }
 
+          if (!payload.deny_payload?.info?.description) {
+            throw new Error("deny_payload.info.description es requerido para action=deny");
+          }
+
           const result = await this.denyOrder(orderId, payload.deny_payload);
           steps.push({ action, ok: true, result });
           continue;
@@ -479,10 +468,6 @@ export function getUberOrdersService(): UberOrdersService {
   return uberOrdersServiceInstance;
 }
 
-/**
- * Alias para mantener compatibilidad con imports existentes:
- * import { getUberApiService } from "../services/uberApi";
- */
 export function getUberApiService(): UberOrdersService {
   return getUberOrdersService();
 }

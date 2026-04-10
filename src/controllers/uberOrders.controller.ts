@@ -236,6 +236,7 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
     }
 
     const rawPayload = normalizedBody as Record<string, unknown>;
+
     const denyReason =
       rawPayload.deny_reason &&
       typeof rawPayload.deny_reason === "object" &&
@@ -243,8 +244,17 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
         ? (rawPayload.deny_reason as Record<string, unknown>)
         : null;
 
+    const info =
+      rawPayload.info &&
+      typeof rawPayload.info === "object" &&
+      !Array.isArray(rawPayload.info)
+        ? (rawPayload.info as Record<string, unknown>)
+        : null;
+
     console.log(chalk.cyan("denyReason:"));
     console.log(denyReason);
+    console.log(chalk.cyan("info:"));
+    console.log(info);
 
     const code =
       denyReason && typeof denyReason.code === "string"
@@ -256,6 +266,11 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
         ? denyReason.description.trim()
         : undefined;
 
+    const infoDescription =
+      info && typeof info.description === "string"
+        ? info.description.trim()
+        : null;
+
     if (!code) {
       res.status(400).json({
         ok: false,
@@ -264,10 +279,21 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
       return;
     }
 
+    if (!infoDescription) {
+      res.status(400).json({
+        ok: false,
+        message: "El body es inválido. Debe incluir info.description"
+      });
+      return;
+    }
+
     const payload: UberDenyOrderPayload = {
       deny_reason: {
         code,
         ...(description ? { description } : {})
+      },
+      info: {
+        description: infoDescription
       }
     };
 
