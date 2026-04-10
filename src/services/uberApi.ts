@@ -1,74 +1,47 @@
-import axios, { AxiosError, AxiosInstance, AxiosResponse } from "axios";
+import axios, { AxiosError, AxiosInstance } from "axios";
 import chalk from "chalk";
 import { UberOrderDetails } from "../types/uber";
+import { getUberAppTokenService } from "./uberAppToken.service";
+import { UberApiRequestError } from "./uberActivation.service";
 
-interface UberTokenResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  scope?: string;
+export interface UberDenyOrderPayload {
+  deny_reason: {
+    code: string;
+    description?: string;
+  };
 }
 
 export interface UberCancelOrderPayload {
-  cancellation_reason: string;
+  cancellation_reason: {
+    code: string;
+    description?: string;
+  };
 }
 
-export interface ListStoreOrdersParams {
+export interface UberListStoreOrdersQuery {
   state?: string;
   status?: string;
   start_time?: string;
   end_time?: string;
-  page_size?: number;
   expand?: string;
+  page_size?: number;
 }
 
 export interface UberOrderValidationFlowPayload {
   actions: Array<"get" | "accept" | "deny" | "cancel" | "update">;
+  deny_payload?: UberDenyOrderPayload;
   cancel_payload?: UberCancelOrderPayload;
   update_payload?: Record<string, unknown>;
 }
 
-export interface UberOrderValidationFlowResult {
-  order_id: string;
-  executed_at: string;
-  results: Array<{
-    action: "get" | "accept" | "deny" | "cancel" | "update";
-    ok: boolean;
-    detail: string;
-    response?: unknown;
-    error?: unknown;
-  }>;
-}
-
-export class UberApiService {
-  private readonly clientId: string;
-  private readonly clientSecret: string;
+export class UberOrdersService {
   private readonly apiBaseUrl: string;
-  private readonly authBaseUrl: string;
   private readonly http: AxiosInstance;
 
-  private accessToken: string | null = null;
-  private accessTokenExpiresAt = 0;
-
   constructor() {
-    const clientId = process.env.UBER_CLIENT_ID;
-    const clientSecret = process.env.UBER_CLIENT_SECRET;
     const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
-    const authBaseUrl = process.env.UBER_AUTH_BASE_URL || "https://auth.uber.com";
 
-    if (!clientId) {
-      throw new Error("Falta la variable de entorno UBER_CLIENT_ID");
-    }
-
-    if (!clientSecret) {
-      throw new Error("Falta la variable de entorno UBER_CLIENT_SECRET");
-    }
-
-    this.clientId = clientId;
-    this.clientSecret = clientSecret;
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
-    this.authBaseUrl = authBaseUrl.replace(/\/+$/, "");
-
     this.http = axios.create({
       timeout: 20000,
       headers: {
@@ -78,155 +51,241 @@ export class UberApiService {
     });
   }
 
-  private buildUrl(path: string): string {
-    return `${this.apiBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
-  }
+  private buildAxiosError(
+    error: AxiosError,
+    fallbackMessage: string,
+    requestUrl?: string
+  ): UberApiRequestError {
+    const statusCode = error.response?.status ?? 500;
+    const responseData = error.response?.data ?? null;
 
-  private logAxiosError(error: AxiosError, fallbackMessage: string, requestUrl?: string): void {
     console.error(chalk.red(fallbackMessage));
+    console.error(chalk.red(`Status: ${statusCode}`));
     console.error(chalk.red(`URL: ${requestUrl ?? "N/A"}`));
-    console.error(chalk.red(`Status: ${error.response?.status ?? "N/A"}`));
-    console.error(
-      chalk.red(`Respuesta: ${JSON.stringify(error.response?.data ?? {}, null, 2)}`)
+    console.error(chalk.red(`Respuesta: ${JSON.stringify(responseData, null, 2)}`));
+
+    let message = fallbackMessage;
+
+    if (
+      responseData &&
+      typeof responseData === "object" &&
+      "message" in responseData &&
+      typeof (responseData as { message?: unknown }).message === "string"
+    ) {
+      message = (responseData as { message: string }).message;
+    } else if (
+      responseData &&
+      typeof responseData === "object" &&
+      "error" in responseData &&
+      typeof (responseData as { error?: unknown }).error === "string"
+    ) {
+      message = (responseData as { error: string }).error;
+    } else if (error.message) {
+      message = error.message;
+    }
+
+    return new UberApiRequestError(
+      message,
+      statusCode,
+      responseData,
+      "uber",
+      requestUrl
     );
   }
 
-  private async getAccessToken(): Promise<string> {
-    const now = Date.now();
-
-    if (this.accessToken && now < this.accessTokenExpiresAt) {
-      return this.accessToken;
-    }
-
-    const form = new URLSearchParams();
-    form.append("client_id", this.clientId);
-    form.append("client_secret", this.clientSecret);
-    form.append("grant_type", "client_credentials");
-    form.append("scope", "eats.order eats.store");
-
-    try {
-      const response = await this.http.post<UberTokenResponse>(
-        `${this.authBaseUrl}/oauth/v2/token`,
-        form,
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-          }
-        }
-      );
-
-      const tokenData = response.data;
-      this.accessToken = tokenData.access_token;
-      this.accessTokenExpiresAt =
-        Date.now() + Math.max(tokenData.expires_in - 60, 60) * 1000;
-
-      console.log(chalk.green("✓ Token OAuth app-level de Uber obtenido correctamente"));
-      console.log(chalk.green(`✓ Scope devuelto: ${tokenData.scope ?? "N/A"}`));
-
-      return this.accessToken;
-    } catch (error: unknown) {
-      if (axios.isAxiosError(error)) {
-        this.logAxiosError(error, "Error obteniendo token OAuth de Uber");
-      }
-
-      throw new Error("No fue posible obtener el token OAuth de Uber");
-    }
+  private async getOrderScopedToken(): Promise<string> {
+    return getUberAppTokenService().getAccessToken(["eats.order"]);
   }
 
-  private async requestWithFallback<T>(
-    requests: Array<() => Promise<AxiosResponse<T>>>,
-    fallbackMessage: string
-  ): Promise<T> {
-    let lastError: unknown = null;
+  private async getStoreScopedToken(): Promise<string> {
+    return getUberAppTokenService().getAccessToken(["eats.store"]);
+  }
 
-    for (const request of requests) {
-      try {
-        const response = await request();
-        return response.data;
-      } catch (error: unknown) {
-        lastError = error;
-      }
-    }
+  private getAuthHeaders(token: string): Record<string, string> {
+    return {
+      Authorization: `Bearer ${token}`
+    };
+  }
 
-    if (axios.isAxiosError(lastError)) {
-      this.logAxiosError(lastError, fallbackMessage, lastError.config?.url);
-    }
+  private buildDeliveryOrderUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}`;
+  }
 
-    throw new Error(fallbackMessage);
+  private buildDeliveryOrderAcceptUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/accept`;
+  }
+
+  private buildDeliveryOrderDenyUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/deny`;
+  }
+
+  private buildDeliveryOrderCancelUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/cancel`;
+  }
+
+  private buildDeliveryOrderCartUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v2/eats/orders/${orderId}/cart`;
+  }
+
+  private buildStoreOrdersUrl(storeId: string): string {
+    return `${this.apiBaseUrl}/v1/eats/stores/${storeId}/orders`;
   }
 
   public async getOrderDetails(orderId: string): Promise<UberOrderDetails> {
-    const token = await this.getAccessToken();
-
-    const officialUrl = this.buildUrl(`/v1/delivery/order/${orderId}`);
-    const altUrl = this.buildUrl(`/v2/eats/order/${orderId}`);
-
-    return this.requestWithFallback<UberOrderDetails>(
-      [
-        () =>
-          this.http.get<UberOrderDetails>(officialUrl, {
-            headers: { Authorization: `Bearer ${token}` }
-          }),
-        () =>
-          this.http.get<UberOrderDetails>(altUrl, {
-            headers: { Authorization: `Bearer ${token}` }
-          })
-      ],
-      `No fue posible obtener el detalle del pedido ${orderId}`
-    );
-  }
-
-  public async acceptOrder(orderId: string): Promise<unknown> {
-    const token = await this.getAccessToken();
-    const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}/accept`);
+    const token = await this.getOrderScopedToken();
+    const requestUrl = this.buildDeliveryOrderUrl(orderId);
 
     try {
-      const response = await this.http.post(
-        requestUrl,
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
+      const response = await this.http.get<UberOrderDetails>(requestUrl, {
+        headers: this.getAuthHeaders(token)
+      });
 
-      console.log(chalk.green(`✓ Pedido ${orderId} aceptado correctamente`));
-      return response.data ?? {};
+      console.log(chalk.green(`✓ Detalle de orden obtenido correctamente para ${orderId}`));
+      return response.data;
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
-        this.logAxiosError(error, `Error al aceptar el pedido ${orderId}`, requestUrl);
+        throw this.buildAxiosError(
+          error,
+          `No fue posible obtener el detalle de la orden ${orderId}`,
+          requestUrl
+        );
       }
 
-      throw new Error(`No fue posible aceptar el pedido ${orderId}`);
+      throw new UberApiRequestError(
+        `No fue posible obtener el detalle de la orden ${orderId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
     }
   }
 
-  public async denyOrder(orderId: string): Promise<unknown> {
-    const token = await this.getAccessToken();
-    const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}/deny`);
+  public async listStoreOrders(
+    storeId: string,
+    query?: UberListStoreOrdersQuery
+  ): Promise<unknown> {
+    const token = await this.getStoreScopedToken();
+    const requestUrl = this.buildStoreOrdersUrl(storeId);
 
     try {
+      const response = await this.http.get(requestUrl, {
+        headers: this.getAuthHeaders(token),
+        params: query ?? {}
+      });
+
+      console.log(chalk.green(`✓ Lista de órdenes obtenida correctamente para store ${storeId}`));
+      return response.data;
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw this.buildAxiosError(
+          error,
+          `No fue posible obtener las órdenes de la store ${storeId}`,
+          requestUrl
+        );
+      }
+
+      throw new UberApiRequestError(
+        `No fue posible obtener las órdenes de la store ${storeId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
+    }
+  }
+
+  public async acceptOrder(orderId: string): Promise<unknown> {
+    const token = await this.getOrderScopedToken();
+    const requestUrl = this.buildDeliveryOrderAcceptUrl(orderId);
+
+    try {
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan("DEBUG SERVICE ACCEPT ORDER"));
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+
       const response = await this.http.post(
         requestUrl,
         {},
         {
           headers: {
-            Authorization: `Bearer ${token}`,
+            ...this.getAuthHeaders(token),
             "Content-Type": "application/json"
           }
         }
       );
 
-      console.log(chalk.green(`✓ Pedido ${orderId} denegado correctamente`));
+      console.log(chalk.green(`✓ Pedido aceptado correctamente ${orderId}`));
       return response.data ?? {};
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
-        this.logAxiosError(error, `Error al denegar el pedido ${orderId}`, requestUrl);
+        throw this.buildAxiosError(
+          error,
+          `No fue posible aceptar el pedido ${orderId}`,
+          requestUrl
+        );
       }
 
-      throw new Error(`No fue posible denegar el pedido ${orderId}`);
+      throw new UberApiRequestError(
+        `No fue posible aceptar el pedido ${orderId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
+    }
+  }
+
+  public async denyOrder(
+    orderId: string,
+    payload: UberDenyOrderPayload
+  ): Promise<unknown> {
+    const token = await this.getOrderScopedToken();
+    const requestUrl = this.buildDeliveryOrderDenyUrl(orderId);
+
+    try {
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan("DEBUG SERVICE DENY ORDER"));
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+      console.log(chalk.cyan("payload deny hacia Uber:"));
+      console.log(JSON.stringify(payload, null, 2));
+      console.log(chalk.cyan(`typeof payload.deny_reason: ${typeof payload.deny_reason}`));
+      console.log(chalk.cyan(`deny_reason.code: ${payload.deny_reason?.code ?? "N/A"}`));
+      console.log(
+        chalk.cyan(`deny_reason.description: ${payload.deny_reason?.description ?? "N/A"}`)
+      );
+
+      const response = await this.http.post(
+        requestUrl,
+        payload,
+        {
+          headers: {
+            ...this.getAuthHeaders(token),
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      console.log(chalk.green(`✓ Pedido denegado correctamente ${orderId}`));
+      return response.data ?? {};
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw this.buildAxiosError(
+          error,
+          `No fue posible denegar el pedido ${orderId}`,
+          requestUrl
+        );
+      }
+
+      throw new UberApiRequestError(
+        `No fue posible denegar el pedido ${orderId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
     }
   }
 
@@ -234,25 +293,59 @@ export class UberApiService {
     orderId: string,
     payload: UberCancelOrderPayload
   ): Promise<unknown> {
-    const token = await this.getAccessToken();
-    const requestUrl = this.buildUrl(`/v1/delivery/order/${orderId}/cancel`);
+    const token = await this.getOrderScopedToken();
+    const requestUrl = this.buildDeliveryOrderCancelUrl(orderId);
 
     try {
-      const response = await this.http.post(requestUrl, payload, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        }
-      });
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan("DEBUG SERVICE CANCEL ORDER"));
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+      console.log(chalk.cyan("payload cancel hacia Uber:"));
+      console.log(JSON.stringify(payload, null, 2));
+      console.log(
+        chalk.cyan(`typeof payload.cancellation_reason: ${typeof payload.cancellation_reason}`)
+      );
+      console.log(
+        chalk.cyan(
+          `cancellation_reason.code: ${payload.cancellation_reason?.code ?? "N/A"}`
+        )
+      );
+      console.log(
+        chalk.cyan(
+          `cancellation_reason.description: ${payload.cancellation_reason?.description ?? "N/A"}`
+        )
+      );
 
-      console.log(chalk.green(`✓ Pedido ${orderId} cancelado correctamente`));
+      const response = await this.http.post(
+        requestUrl,
+        payload,
+        {
+          headers: {
+            ...this.getAuthHeaders(token),
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      console.log(chalk.green(`✓ Pedido cancelado correctamente ${orderId}`));
       return response.data ?? {};
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
-        this.logAxiosError(error, `Error al cancelar el pedido ${orderId}`, requestUrl);
+        throw this.buildAxiosError(
+          error,
+          `No fue posible cancelar el pedido ${orderId}`,
+          requestUrl
+        );
       }
 
-      throw new Error(`No fue posible cancelar el pedido ${orderId}`);
+      throw new UberApiRequestError(
+        `No fue posible cancelar el pedido ${orderId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
     }
   }
 
@@ -260,172 +353,136 @@ export class UberApiService {
     orderId: string,
     payload: Record<string, unknown>
   ): Promise<unknown> {
-    const token = await this.getAccessToken();
-    const requestUrl = this.buildUrl(`/v2/eats/orders/${orderId}/cart`);
+    const token = await this.getOrderScopedToken();
+    const requestUrl = this.buildDeliveryOrderCartUrl(orderId);
 
     try {
-      const response = await this.http.patch(requestUrl, payload, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
+      const response = await this.http.patch(
+        requestUrl,
+        payload,
+        {
+          headers: {
+            ...this.getAuthHeaders(token),
+            "Content-Type": "application/json"
+          }
         }
-      });
+      );
 
-      console.log(chalk.green(`✓ Cart del pedido ${orderId} actualizado correctamente`));
+      console.log(chalk.green(`✓ Pedido actualizado correctamente ${orderId}`));
       return response.data ?? {};
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
-        this.logAxiosError(error, `Error al actualizar el pedido ${orderId}`, requestUrl);
+        throw this.buildAxiosError(
+          error,
+          `No fue posible actualizar el pedido ${orderId}`,
+          requestUrl
+        );
       }
 
-      throw new Error(`No fue posible actualizar el pedido ${orderId}`);
+      throw new UberApiRequestError(
+        `No fue posible actualizar el pedido ${orderId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
     }
-  }
-
-  public async listStoreOrders(
-    storeId: string,
-    params?: ListStoreOrdersParams
-  ): Promise<unknown> {
-    const token = await this.getAccessToken();
-
-    const officialUrl = this.buildUrl(`/v1/delivery/store/${storeId}/orders`);
-    const altUrl = this.buildUrl(`/v1/eats/stores/${storeId}/orders`);
-
-    return this.requestWithFallback<unknown>(
-      [
-        () =>
-          this.http.get(officialUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-            params: {
-              expand: params?.expand ?? "carts,payment",
-              state: params?.state,
-              status: params?.status,
-              start_time: params?.start_time,
-              end_time: params?.end_time,
-              page_size: params?.page_size ?? 20
-            }
-          }),
-        () =>
-          this.http.get(altUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-            params: {
-              expand: params?.expand ?? "carts,payment",
-              state: params?.state,
-              status: params?.status,
-              start_time: params?.start_time,
-              end_time: params?.end_time,
-              page_size: params?.page_size ?? 20
-            }
-          })
-      ],
-      `No fue posible listar las órdenes de la store ${storeId}`
-    );
   }
 
   public async runValidationFlow(
     orderId: string,
-    flow: UberOrderValidationFlowPayload
-  ): Promise<UberOrderValidationFlowResult> {
-    const results: UberOrderValidationFlowResult["results"] = [];
+    payload: UberOrderValidationFlowPayload
+  ): Promise<{
+    order_id: string;
+    steps: Array<{
+      action: "get" | "accept" | "deny" | "cancel" | "update";
+      ok: boolean;
+      result?: unknown;
+      error?: unknown;
+    }>;
+  }> {
+    const steps: Array<{
+      action: "get" | "accept" | "deny" | "cancel" | "update";
+      ok: boolean;
+      result?: unknown;
+      error?: unknown;
+    }> = [];
 
-    for (const action of flow.actions) {
+    for (const action of payload.actions) {
       try {
-        switch (action) {
-          case "get": {
-            const response = await this.getOrderDetails(orderId);
-            results.push({
-              action,
-              ok: true,
-              detail: "Get Order Details ejecutado correctamente",
-              response
-            });
-            break;
+        if (action === "get") {
+          const result = await this.getOrderDetails(orderId);
+          steps.push({ action, ok: true, result });
+          continue;
+        }
+
+        if (action === "accept") {
+          const result = await this.acceptOrder(orderId);
+          steps.push({ action, ok: true, result });
+          continue;
+        }
+
+        if (action === "deny") {
+          if (!payload.deny_payload?.deny_reason?.code) {
+            throw new Error("deny_payload.deny_reason.code es requerido para action=deny");
           }
 
-          case "accept": {
-            const response = await this.acceptOrder(orderId);
-            results.push({
-              action,
-              ok: true,
-              detail: "Accept Order ejecutado correctamente",
-              response
-            });
-            break;
+          const result = await this.denyOrder(orderId, payload.deny_payload);
+          steps.push({ action, ok: true, result });
+          continue;
+        }
+
+        if (action === "cancel") {
+          if (!payload.cancel_payload?.cancellation_reason?.code) {
+            throw new Error(
+              "cancel_payload.cancellation_reason.code es requerido para action=cancel"
+            );
           }
 
-          case "deny": {
-            const response = await this.denyOrder(orderId);
-            results.push({
-              action,
-              ok: true,
-              detail: "Deny Order ejecutado correctamente",
-              response
-            });
-            break;
+          const result = await this.cancelOrder(orderId, payload.cancel_payload);
+          steps.push({ action, ok: true, result });
+          continue;
+        }
+
+        if (action === "update") {
+          if (!payload.update_payload || typeof payload.update_payload !== "object") {
+            throw new Error("update_payload es requerido para action=update");
           }
 
-          case "cancel": {
-            if (!flow.cancel_payload?.cancellation_reason) {
-              throw new Error("cancel_payload.cancellation_reason es requerido para ejecutar cancel");
-            }
-
-            const response = await this.cancelOrder(orderId, flow.cancel_payload);
-            results.push({
-              action,
-              ok: true,
-              detail: "Cancel Order ejecutado correctamente",
-              response
-            });
-            break;
-          }
-
-          case "update": {
-            if (!flow.update_payload) {
-              throw new Error("update_payload es requerido para ejecutar update");
-            }
-
-            const response = await this.updateOrderCart(orderId, flow.update_payload);
-            results.push({
-              action,
-              ok: true,
-              detail: "Update Order/Cart ejecutado correctamente",
-              response
-            });
-            break;
-          }
-
-          default:
-            results.push({
-              action,
-              ok: false,
-              detail: "Acción no soportada"
-            });
+          const result = await this.updateOrderCart(orderId, payload.update_payload);
+          steps.push({ action, ok: true, result });
+          continue;
         }
       } catch (error: unknown) {
-        results.push({
+        steps.push({
           action,
           ok: false,
-          detail:
-            error instanceof Error ? error.message : "Error desconocido ejecutando acción",
-          error: error instanceof Error ? { message: error.message } : error
+          error: error instanceof Error ? error.message : error
         });
       }
     }
 
     return {
       order_id: orderId,
-      executed_at: new Date().toISOString(),
-      results
+      steps
     };
   }
 }
 
-let uberApiServiceInstance: UberApiService | null = null;
+let uberOrdersServiceInstance: UberOrdersService | null = null;
 
-export function getUberApiService(): UberApiService {
-  if (!uberApiServiceInstance) {
-    uberApiServiceInstance = new UberApiService();
+export function getUberOrdersService(): UberOrdersService {
+  if (!uberOrdersServiceInstance) {
+    uberOrdersServiceInstance = new UberOrdersService();
   }
 
-  return uberApiServiceInstance;
+  return uberOrdersServiceInstance;
+}
+
+/**
+ * Alias para mantener compatibilidad con imports existentes:
+ * import { getUberApiService } from "../services/uberApi";
+ */
+export function getUberApiService(): UberOrdersService {
+  return getUberOrdersService();
 }

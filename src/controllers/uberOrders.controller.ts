@@ -3,6 +3,7 @@ import chalk from "chalk";
 import {
   getUberApiService,
   UberCancelOrderPayload,
+  UberDenyOrderPayload,
   UberOrderValidationFlowPayload
 } from "../services/uberApi";
 
@@ -203,7 +204,77 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
     const orderId = resolveOrderId(req, res);
     if (!orderId) return;
 
-    const result = await getUberApiService().denyOrder(orderId);
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan("DEBUG DENY ORDER"));
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan(`orderId: ${orderId}`));
+    console.log(chalk.cyan(`typeof req.body: ${typeof req.body}`));
+    console.log(chalk.cyan("req.body crudo:"));
+    console.log(req.body);
+
+    const parsedFromString = safeParseJsonObject(req.body);
+
+    if (parsedFromString) {
+      console.log(chalk.yellow("req.body llegó como string JSON; se parseó correctamente."));
+    }
+
+    const normalizedBody =
+      parsedFromString ??
+      (req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : null);
+
+    console.log(chalk.cyan("normalizedBody deny:"));
+    console.log(normalizedBody);
+
+    if (!normalizedBody) {
+      res.status(400).json({
+        ok: false,
+        message: "El body del deny debe ser un objeto JSON válido"
+      });
+      return;
+    }
+
+    const rawPayload = normalizedBody as Record<string, unknown>;
+    const denyReason =
+      rawPayload.deny_reason &&
+      typeof rawPayload.deny_reason === "object" &&
+      !Array.isArray(rawPayload.deny_reason)
+        ? (rawPayload.deny_reason as Record<string, unknown>)
+        : null;
+
+    console.log(chalk.cyan("denyReason:"));
+    console.log(denyReason);
+
+    const code =
+      denyReason && typeof denyReason.code === "string"
+        ? denyReason.code.trim()
+        : null;
+
+    const description =
+      denyReason && typeof denyReason.description === "string"
+        ? denyReason.description.trim()
+        : undefined;
+
+    if (!code) {
+      res.status(400).json({
+        ok: false,
+        message: "El body es inválido. Debe incluir deny_reason.code"
+      });
+      return;
+    }
+
+    const payload: UberDenyOrderPayload = {
+      deny_reason: {
+        code,
+        ...(description ? { description } : {})
+      }
+    };
+
+    console.log(chalk.green("payload deny saneado enviado a Uber:"));
+    console.log(JSON.stringify(payload, null, 2));
+
+    const result = await getUberApiService().denyOrder(orderId, payload);
 
     res.status(200).json({
       ok: true,
@@ -243,9 +314,8 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
         ? (req.body as Record<string, unknown>)
         : null);
 
-    console.log(chalk.cyan("normalizedBody:"));
+    console.log(chalk.cyan("normalizedBody cancel:"));
     console.log(normalizedBody);
-    console.log(chalk.cyan(`typeof normalizedBody: ${typeof normalizedBody}`));
 
     if (!normalizedBody) {
       res.status(400).json({
@@ -255,35 +325,46 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
       return;
     }
 
-    const payload = normalizedBody as unknown as UberCancelOrderPayload;
-
-    console.log(chalk.cyan("payload final hacia el service:"));
-    console.log(JSON.stringify(payload, null, 2));
-
+    const rawPayload = normalizedBody as Record<string, unknown>;
     const cancellationReason =
-      typeof payload.cancellation_reason === "string"
-        ? payload.cancellation_reason
+      rawPayload.cancellation_reason &&
+      typeof rawPayload.cancellation_reason === "object" &&
+      !Array.isArray(rawPayload.cancellation_reason)
+        ? (rawPayload.cancellation_reason as Record<string, unknown>)
         : null;
 
-    console.log(chalk.cyan(`typeof payload.cancellation_reason: ${typeof payload.cancellation_reason}`));
-    console.log(chalk.cyan(`payload.cancellation_reason: ${String(payload.cancellation_reason)}`));
+    console.log(chalk.cyan("cancellationReason:"));
+    console.log(cancellationReason);
 
-    if (!cancellationReason) {
+    const code =
+      cancellationReason && typeof cancellationReason.code === "string"
+        ? cancellationReason.code.trim()
+        : null;
+
+    const description =
+      cancellationReason && typeof cancellationReason.description === "string"
+        ? cancellationReason.description.trim()
+        : undefined;
+
+    if (!code) {
       res.status(400).json({
         ok: false,
-        message: "El body es inválido. Debe incluir cancellation_reason como string"
+        message: "El body es inválido. Debe incluir cancellation_reason.code"
       });
       return;
     }
 
-    const sanitizedPayload: UberCancelOrderPayload = {
-      cancellation_reason: cancellationReason
+    const payload: UberCancelOrderPayload = {
+      cancellation_reason: {
+        code,
+        ...(description ? { description } : {})
+      }
     };
 
-    console.log(chalk.green("payload saneado enviado a Uber:"));
-    console.log(JSON.stringify(sanitizedPayload, null, 2));
+    console.log(chalk.green("payload cancel saneado enviado a Uber:"));
+    console.log(JSON.stringify(payload, null, 2));
 
-    const result = await getUberApiService().cancelOrder(orderId, sanitizedPayload);
+    const result = await getUberApiService().cancelOrder(orderId, payload);
 
     res.status(200).json({
       ok: true,
@@ -347,6 +428,7 @@ export async function runOrderValidationFlow(req: Request, res: Response): Promi
 
     const result = await getUberApiService().runValidationFlow(orderId, {
       actions,
+      deny_payload: body.deny_payload,
       cancel_payload: body.cancel_payload,
       update_payload: body.update_payload
     });
