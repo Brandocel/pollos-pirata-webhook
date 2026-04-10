@@ -5,7 +5,7 @@ import {
   UberCartItem,
   UberModifierGroup,
   UberOrderDetails,
-  UberWebhookEvent,
+  UberWebhookEvent
 } from "../types/uber";
 import { verifyUberSignature } from "../utils/signature";
 
@@ -18,21 +18,30 @@ function getSingleString(value: unknown): string | null {
     const normalized = value.trim();
     return normalized.length > 0 ? normalized : null;
   }
+
   if (Array.isArray(value)) {
     const first = value.find((item) => typeof item === "string" && item.trim().length > 0);
     return typeof first === "string" ? first.trim() : null;
   }
+
   return null;
 }
 
 function formatMoney(formatted?: string, amount?: number, currency?: string): string {
-  if (formatted) return formatted;
-  if (typeof amount === "number") return `${(amount / 100).toFixed(2)} ${currency ?? ""}`.trim();
+  if (formatted) {
+    return formatted;
+  }
+
+  if (typeof amount === "number") {
+    return `${(amount / 100).toFixed(2)} ${currency ?? ""}`.trim();
+  }
+
   return "No disponible";
 }
 
 function getDeliveryAddress(order: UberOrderDetails): string {
   const location = order.eater?.delivery?.location;
+
   if (!location) {
     return "No disponible / pedido no expone dirección";
   }
@@ -41,14 +50,16 @@ function getDeliveryAddress(order: UberOrderDetails): string {
     location.title,
     location.street_address,
     location.unit_number ? `Unidad: ${location.unit_number}` : undefined,
-    location.business_name ? `Referencia: ${location.business_name}` : undefined,
+    location.business_name ? `Referencia: ${location.business_name}` : undefined
   ].filter(Boolean);
 
   return parts.length > 0 ? parts.join(" | ") : "No disponible / pedido no expone dirección";
 }
 
 function printModifierGroups(groups?: UberModifierGroup[] | null, indent = "    "): void {
-  if (!groups || groups.length === 0) return;
+  if (!groups || groups.length === 0) {
+    return;
+  }
 
   for (const group of groups) {
     console.log(chalk.cyan(`${indent}Grupo: ${group.title ?? "Sin título"}`));
@@ -56,6 +67,7 @@ function printModifierGroups(groups?: UberModifierGroup[] | null, indent = "    
     for (const selected of group.selected_items ?? []) {
       const quantity = selected.quantity ?? 0;
       const title = selected.title ?? "Modificador sin nombre";
+
       console.log(chalk.cyan(`${indent}- ${quantity} x ${title}`));
 
       if (selected.special_instructions) {
@@ -71,10 +83,9 @@ function printModifierGroups(groups?: UberModifierGroup[] | null, indent = "    
 
 function printOrderSummary(order: UberOrderDetails): void {
   const total = order.payment?.charges?.total;
-  const customerName = [order.eater?.first_name, order.eater?.last_name]
-    .filter(Boolean)
-    .join(" ")
-    .trim() || "No disponible";
+  const customerName =
+    [order.eater?.first_name, order.eater?.last_name].filter(Boolean).join(" ").trim() ||
+    "No disponible";
 
   const phone = order.eater?.phone || "No disponible";
   const address = getDeliveryAddress(order);
@@ -89,7 +100,11 @@ function printOrderSummary(order: UberOrderDetails): void {
   console.log(chalk.white(`Cliente: ${customerName}`));
   console.log(chalk.white(`Teléfono: ${phone}`));
   console.log(chalk.white(`Dirección: ${address}`));
-  console.log(chalk.white(`Total: ${formatMoney(total?.formatted_amount, total?.amount, total?.currency_code)}`));
+  console.log(
+    chalk.white(
+      `Total: ${formatMoney(total?.formatted_amount, total?.amount, total?.currency_code)}`
+    )
+  );
 
   const instructions = order.cart?.special_instructions?.trim();
   console.log(chalk.magenta(`Instrucciones: ${instructions || "Ninguna"}`));
@@ -108,7 +123,11 @@ function printOrderSummary(order: UberOrderDetails): void {
 
     console.log(
       chalk.green(
-        `- ${qty} x ${title} (${formatMoney(price?.formatted_amount, price?.amount, price?.currency_code)})`
+        `- ${qty} x ${title} (${formatMoney(
+          price?.formatted_amount,
+          price?.amount,
+          price?.currency_code
+        )})`
       )
     );
 
@@ -124,71 +143,111 @@ function printOrderSummary(order: UberOrderDetails): void {
   console.log(chalk.bgGreen.black("==============================================\n"));
 }
 
-// ====================== WEBHOOK PRINCIPAL ======================
-export async function handleUberWebhook(req: Request, res: Response): Promise<void> {
-  const clientSecret = process.env.UBER_CLIENT_SECRET;
+function getWebhookSigningKeys(): string[] {
+  const keys = [
+    process.env.UBER_WEBHOOK_SIGNING_KEY,
+    process.env.UBER_WEBHOOK_SECONDARY_SIGNING_KEY
+  ]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter((value) => value.length > 0);
 
-  if (!clientSecret) {
-    console.error(chalk.red("ERROR: Falta UBER_CLIENT_SECRET en .env"));
-    res.status(200).end();
-    return;
+  return [...new Set(keys)];
+}
+
+function verifyWithAnySigningKey(rawBody: Buffer, signatureHeader: string): boolean {
+  const signingKeys = getWebhookSigningKeys();
+
+  if (signingKeys.length === 0) {
+    console.error(
+      chalk.red("ERROR: Faltan UBER_WEBHOOK_SIGNING_KEY / UBER_WEBHOOK_SECONDARY_SIGNING_KEY")
+    );
+    return false;
   }
 
+  for (const signingKey of signingKeys) {
+    const isValid = verifyUberSignature({
+      rawBody,
+      clientSecret: signingKey,
+      signatureHeader
+    });
+
+    if (isValid) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// ====================== WEBHOOK PRINCIPAL ======================
+export async function handleUberWebhook(req: Request, res: Response): Promise<void> {
   const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   const signatureHeader = req.header("X-Uber-Signature");
 
-  // ==================== MANEJO INTELIGENTE DE FIRMA ====================
+  console.log(chalk.blue("=============================================="));
+  console.log(chalk.blue("Webhook de Uber recibido"));
+  console.log(chalk.blue(`Timestamp: ${new Date().toISOString()}`));
+  console.log(chalk.blue(`URL: ${req.originalUrl}`));
+  console.log(chalk.blue(`Content-Type: ${req.header("content-type") ?? "N/A"}`));
+  console.log(chalk.blue(`X-Uber-Signature presente: ${signatureHeader ? "Sí" : "No"}`));
+  console.log(chalk.blue(`Raw body length: ${rawBody.length}`));
+  console.log(chalk.blue("=============================================="));
+
   let signatureValid = true;
 
   if (signatureHeader && signatureHeader.trim() !== "") {
-    // Solo verificamos si Uber envió firma (webhook real)
-    signatureValid = verifyUberSignature({
-      rawBody,
-      clientSecret,
-      signatureHeader,
-    });
+    signatureValid = verifyWithAnySigningKey(rawBody, signatureHeader);
 
     if (!signatureValid) {
-      console.error(chalk.red("Firma HMAC-SHA256 inválida - Posible ataque o secreto incorrecto"));
+      console.error(chalk.red("Firma HMAC-SHA256 inválida"));
+      console.error(
+        chalk.red(
+          "Revisa que UBER_WEBHOOK_SIGNING_KEY coincida exactamente con el Signing Key del dashboard"
+        )
+      );
+
+      res.status(200).end();
+      return;
     }
+
+    console.log(chalk.green("✓ Firma del webhook válida"));
   } else {
-    // Prueba manual desde Swagger o Postman
-    console.log(chalk.yellow("⚠️  Prueba manual detectada - Firma omitida (comportamiento normal)"));
-  }
-  // =================================================================
-
-  if (!signatureValid) {
-    res.status(200).end();
-    return;
+    console.log(chalk.yellow("⚠️ Prueba manual detectada - Firma omitida"));
   }
 
-  // Parsear el payload
   let payload: UberWebhookEvent;
+
   try {
     payload = safeJsonParse<UberWebhookEvent>(rawBody);
-  } catch (err) {
+  } catch (error: unknown) {
     console.error(chalk.red("No se pudo parsear el JSON del webhook"));
+    console.error(chalk.red(error instanceof Error ? error.message : String(error)));
     res.status(200).end();
     return;
   }
 
-  // Responder inmediatamente (¡Muy importante para Uber!)
+  console.log(chalk.magenta("Payload completo del webhook:"));
+  console.log(JSON.stringify(payload, null, 2));
+
   res.status(200).end();
 
-  // Procesamiento en segundo plano
   void (async () => {
     try {
-      console.log(chalk.gray(`Webhook recibido → ${payload.event_type} | Event ID: ${payload.event_id || "N/A"}`));
+      console.log(
+        chalk.gray(
+          `Webhook recibido → ${payload.event_type} | Event ID: ${payload.event_id || "N/A"}`
+        )
+      );
 
       if (payload.event_type !== "orders.notification") {
         console.log(chalk.yellow(`Evento ignorado: ${payload.event_type}`));
         return;
       }
 
-      // Obtener orderId con fallback
       let orderId = getSingleString(payload.meta?.resource_id);
+
       if (!orderId && payload.resource_href) {
-        const match = payload.resource_href.match(/order\/(.+)$/);
+        const match = payload.resource_href.match(/\/order\/([^/?]+)/i);
         orderId = match ? match[1] : null;
       }
 
@@ -204,7 +263,6 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
 
       printOrderSummary(order);
 
-      // Auto-aceptar (solo en modo test)
       const autoAccept = process.env.AUTO_ACCEPT_ORDERS === "true";
 
       if (autoAccept) {
@@ -212,7 +270,9 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
         await uberApiService.acceptOrder(orderId);
         console.log(chalk.green("✅ Pedido aceptado automáticamente"));
       } else {
-        console.log(chalk.yellow("AUTO_ACCEPT_ORDERS=false → Pedido queda pendiente de aceptación manual"));
+        console.log(
+          chalk.yellow("AUTO_ACCEPT_ORDERS=false → Pedido queda pendiente de aceptación manual")
+        );
       }
     } catch (error: unknown) {
       console.error(chalk.red("Error procesando el webhook:"));
@@ -225,8 +285,12 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
 export async function getOrderDetailsManually(req: Request, res: Response): Promise<void> {
   try {
     const orderId = getSingleString(req.params.orderId);
+
     if (!orderId) {
-      res.status(400).json({ ok: false, message: "orderId es requerido" });
+      res.status(400).json({
+        ok: false,
+        message: "orderId es requerido"
+      });
       return;
     }
 
@@ -236,13 +300,15 @@ export async function getOrderDetailsManually(req: Request, res: Response): Prom
     res.status(200).json({
       ok: true,
       message: "Pedido obtenido correctamente",
-      data: order,
+      data: order
     });
   } catch (error: unknown) {
-    console.error(chalk.red("Error en getOrderDetailsManually:"), error);
+    console.error(chalk.red("Error en getOrderDetailsManually:"));
+    console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+
     res.status(500).json({
       ok: false,
-      message: "No se pudo obtener el pedido",
+      message: "No se pudo obtener el pedido"
     });
   }
 }
