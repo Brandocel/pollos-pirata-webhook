@@ -55,9 +55,9 @@ export interface UberUpdateStoreIntegrationRequest {
 export interface UberStoreIntegrationDetails {
   store_id: string;
   is_order_manager?: boolean;
-  integrator_store_id?: string | null;
-  integrator_brand_id?: string | null;
-  merchant_store_id?: string | null;
+  integrator_store_id: string | null;
+  integrator_brand_id: string | null;
+  merchant_store_id: string | null;
   integration_enabled?: boolean;
   raw?: unknown;
 }
