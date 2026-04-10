@@ -3,7 +3,8 @@ export const ordersPaths = {
     get: {
       tags: ["Orders"],
       summary: "Obtener detalle de una orden de Uber Eats",
-      description: "Obtiene el detalle completo de una orden usando delivery/order y fallback a eats/order.",
+      description:
+        "Obtiene el detalle completo de una orden usando delivery/order y fallback a eats/order.",
       parameters: [
         {
           name: "orderId",
@@ -110,9 +111,22 @@ export const ordersPaths = {
           name: "orderId",
           in: "path",
           required: true,
-          schema: { type: "string" }
+          schema: {
+            type: "string"
+          }
         }
       ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              example: {}
+            }
+          }
+        }
+      },
       responses: {
         "200": {
           description: "Pedido aceptado correctamente"
@@ -131,9 +145,44 @@ export const ordersPaths = {
           name: "orderId",
           in: "path",
           required: true,
-          schema: { type: "string" }
+          schema: {
+            type: "string"
+          }
         }
       ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["deny_reason"],
+              properties: {
+                deny_reason: {
+                  type: "object",
+                  required: ["code"],
+                  properties: {
+                    code: {
+                      type: "string",
+                      example: "OTHER"
+                    },
+                    description: {
+                      type: "string",
+                      example: "Store is unable to fulfill the order"
+                    }
+                  }
+                }
+              }
+            },
+            example: {
+              deny_reason: {
+                code: "OTHER",
+                description: "Store is unable to fulfill the order"
+              }
+            }
+          }
+        }
+      },
       responses: {
         "200": {
           description: "Pedido denegado correctamente"
@@ -152,7 +201,9 @@ export const ordersPaths = {
           name: "orderId",
           in: "path",
           required: true,
-          schema: { type: "string" }
+          schema: {
+            type: "string"
+          }
         }
       ],
       requestBody: {
@@ -164,9 +215,25 @@ export const ordersPaths = {
               required: ["cancellation_reason"],
               properties: {
                 cancellation_reason: {
-                  type: "string",
-                  example: "CUSTOMER_CALLED_TO_CANCEL"
+                  type: "object",
+                  required: ["code"],
+                  properties: {
+                    code: {
+                      type: "string",
+                      example: "CUSTOMER_CALLED_TO_CANCEL"
+                    },
+                    description: {
+                      type: "string",
+                      example: "Customer requested cancellation by phone"
+                    }
+                  }
                 }
+              }
+            },
+            example: {
+              cancellation_reason: {
+                code: "CUSTOMER_CALLED_TO_CANCEL",
+                description: "Customer requested cancellation by phone"
               }
             }
           }
@@ -190,7 +257,9 @@ export const ordersPaths = {
           name: "orderId",
           in: "path",
           required: true,
-          schema: { type: "string" }
+          schema: {
+            type: "string"
+          }
         }
       ],
       requestBody: {
@@ -220,7 +289,9 @@ export const ordersPaths = {
           name: "orderId",
           in: "path",
           required: true,
-          schema: { type: "string" }
+          schema: {
+            type: "string"
+          }
         }
       ],
       requestBody: {
@@ -238,17 +309,61 @@ export const ordersPaths = {
                     enum: ["get", "accept", "deny", "cancel", "update"]
                   }
                 },
+                deny_payload: {
+                  type: "object",
+                  properties: {
+                    deny_reason: {
+                      type: "object",
+                      required: ["code"],
+                      properties: {
+                        code: {
+                          type: "string",
+                          example: "OTHER"
+                        },
+                        description: {
+                          type: "string",
+                          example: "Store is unable to fulfill the order"
+                        }
+                      }
+                    }
+                  }
+                },
                 cancel_payload: {
                   type: "object",
                   properties: {
                     cancellation_reason: {
-                      type: "string",
-                      example: "CUSTOMER_CALLED_TO_CANCEL"
+                      type: "object",
+                      required: ["code"],
+                      properties: {
+                        code: {
+                          type: "string",
+                          example: "CUSTOMER_CALLED_TO_CANCEL"
+                        },
+                        description: {
+                          type: "string",
+                          example: "Customer requested cancellation by phone"
+                        }
+                      }
                     }
                   }
                 },
                 update_payload: {
                   type: "object"
+                }
+              }
+            },
+            example: {
+              actions: ["get", "deny", "cancel"],
+              deny_payload: {
+                deny_reason: {
+                  code: "OTHER",
+                  description: "Store is unable to fulfill the order"
+                }
+              },
+              cancel_payload: {
+                cancellation_reason: {
+                  code: "CUSTOMER_CALLED_TO_CANCEL",
+                  description: "Customer requested cancellation by phone"
                 }
               }
             }
