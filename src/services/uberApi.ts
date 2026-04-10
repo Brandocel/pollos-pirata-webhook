@@ -4,13 +4,23 @@ import { UberOrderDetails } from "../types/uber";
 import { getUberAppTokenService } from "./uberAppToken.service";
 import { UberApiRequestError } from "./uberActivation.service";
 
+export interface UberInvalidItemMetadata {
+  id?: string;
+  type?: string;
+  client_error_code?: string;
+  info?: string;
+  external_id?: string;
+}
+
 export interface UberDenyOrderPayload {
   deny_reason: {
-    code: string;
-    description?: string;
-  };
-  info: {
-    description: string;
+    info: string;
+    type: string;
+    client_error_code?: string;
+    item_metadata?: {
+      invalid_item?: UberInvalidItemMetadata[];
+      out_of_stock_item?: UberInvalidItemMetadata[];
+    };
   };
 }
 
@@ -408,12 +418,12 @@ export class UberOrdersService {
         }
 
         if (action === "deny") {
-          if (!payload.deny_payload?.deny_reason?.code) {
-            throw new Error("deny_payload.deny_reason.code es requerido para action=deny");
+          if (!payload.deny_payload?.deny_reason?.type) {
+            throw new Error("deny_payload.deny_reason.type es requerido para action=deny");
           }
 
-          if (!payload.deny_payload?.info?.description) {
-            throw new Error("deny_payload.info.description es requerido para action=deny");
+          if (!payload.deny_payload?.deny_reason?.info) {
+            throw new Error("deny_payload.deny_reason.info es requerido para action=deny");
           }
 
           const result = await this.denyOrder(orderId, payload.deny_payload);

@@ -244,56 +244,54 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
         ? (rawPayload.deny_reason as Record<string, unknown>)
         : null;
 
-    const info =
-      rawPayload.info &&
-      typeof rawPayload.info === "object" &&
-      !Array.isArray(rawPayload.info)
-        ? (rawPayload.info as Record<string, unknown>)
-        : null;
-
     console.log(chalk.cyan("denyReason:"));
     console.log(denyReason);
-    console.log(chalk.cyan("info:"));
-    console.log(info);
 
-    const code =
-      denyReason && typeof denyReason.code === "string"
-        ? denyReason.code.trim()
+    const info =
+      denyReason && typeof denyReason.info === "string"
+        ? denyReason.info.trim()
         : null;
 
-    const description =
-      denyReason && typeof denyReason.description === "string"
-        ? denyReason.description.trim()
+    const type =
+      denyReason && typeof denyReason.type === "string"
+        ? denyReason.type.trim()
+        : null;
+
+    const clientErrorCode =
+      denyReason && typeof denyReason.client_error_code === "string"
+        ? denyReason.client_error_code.trim()
         : undefined;
 
-    const infoDescription =
-      info && typeof info.description === "string"
-        ? info.description.trim()
-        : null;
+    const itemMetadata =
+      denyReason &&
+      denyReason.item_metadata &&
+      typeof denyReason.item_metadata === "object" &&
+      !Array.isArray(denyReason.item_metadata)
+        ? (denyReason.item_metadata as UberDenyOrderPayload["deny_reason"]["item_metadata"])
+        : undefined;
 
-    if (!code) {
+    if (!info) {
       res.status(400).json({
         ok: false,
-        message: "El body es inválido. Debe incluir deny_reason.code"
+        message: "El body es inválido. Debe incluir deny_reason.info"
       });
       return;
     }
 
-    if (!infoDescription) {
+    if (!type) {
       res.status(400).json({
         ok: false,
-        message: "El body es inválido. Debe incluir info.description"
+        message: "El body es inválido. Debe incluir deny_reason.type"
       });
       return;
     }
 
     const payload: UberDenyOrderPayload = {
       deny_reason: {
-        code,
-        ...(description ? { description } : {})
-      },
-      info: {
-        description: infoDescription
+        info,
+        type,
+        ...(clientErrorCode ? { client_error_code: clientErrorCode } : {}),
+        ...(itemMetadata ? { item_metadata: itemMetadata } : {})
       }
     };
 

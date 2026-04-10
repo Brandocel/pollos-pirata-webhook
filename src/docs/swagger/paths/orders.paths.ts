@@ -156,29 +156,54 @@ export const ordersPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["deny_reason", "info"],
+              required: ["deny_reason"],
               properties: {
                 deny_reason: {
                   type: "object",
-                  required: ["code"],
+                  required: ["info", "type"],
                   properties: {
-                    code: {
+                    info: {
                       type: "string",
-                      example: "OTHER"
+                      example: "Item is not available"
                     },
-                    description: {
+                    type: {
                       type: "string",
-                      example: "Store is unable to fulfill the order"
-                    }
-                  }
-                },
-                info: {
-                  type: "object",
-                  required: ["description"],
-                  properties: {
-                    description: {
+                      example: "ITEM_ISSUE"
+                    },
+                    client_error_code: {
                       type: "string",
-                      example: "Store is unable to fulfill the order"
+                      example: "408"
+                    },
+                    item_metadata: {
+                      type: "object",
+                      properties: {
+                        invalid_item: {
+                          type: "array",
+                          items: {
+                            type: "object",
+                            properties: {
+                              id: { type: "string" },
+                              type: { type: "string", example: "NOT_ON_MENU" },
+                              client_error_code: { type: "string", example: "408" },
+                              info: { type: "string", example: "Broken oven." },
+                              external_id: { type: "string", example: "chz_piz_18" }
+                            }
+                          }
+                        },
+                        out_of_stock_item: {
+                          type: "array",
+                          items: {
+                            type: "object",
+                            properties: {
+                              id: { type: "string" },
+                              type: { type: "string", example: "OUT_OF_STOCK" },
+                              client_error_code: { type: "string", example: "408" },
+                              info: { type: "string", example: "Item unavailable." },
+                              external_id: { type: "string", example: "chz_piz_18" }
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -186,11 +211,20 @@ export const ordersPaths = {
             },
             example: {
               deny_reason: {
-                code: "OTHER",
-                description: "Store is unable to fulfill the order"
-              },
-              info: {
-                description: "Store is unable to fulfill the order"
+                info: "Item is not available",
+                type: "ITEM_ISSUE",
+                client_error_code: "408",
+                item_metadata: {
+                  invalid_item: [
+                    {
+                      id: "d3ffe8b6-ee90-11ed-a05b-0242ac120003chz_piz_18",
+                      type: "NOT_ON_MENU",
+                      client_error_code: "408",
+                      info: "Broken oven.",
+                      external_id: "chz_piz_18"
+                    }
+                  ]
+                }
               }
             }
           }
@@ -324,29 +358,26 @@ export const ordersPaths = {
                 },
                 deny_payload: {
                   type: "object",
-                  required: ["deny_reason", "info"],
+                  required: ["deny_reason"],
                   properties: {
                     deny_reason: {
                       type: "object",
-                      required: ["code"],
+                      required: ["info", "type"],
                       properties: {
-                        code: {
+                        info: {
                           type: "string",
-                          example: "OTHER"
+                          example: "Item is not available"
                         },
-                        description: {
+                        type: {
                           type: "string",
-                          example: "Store is unable to fulfill the order"
-                        }
-                      }
-                    },
-                    info: {
-                      type: "object",
-                      required: ["description"],
-                      properties: {
-                        description: {
+                          example: "ITEM_ISSUE"
+                        },
+                        client_error_code: {
                           type: "string",
-                          example: "Store is unable to fulfill the order"
+                          example: "408"
+                        },
+                        item_metadata: {
+                          type: "object"
                         }
                       }
                     }
@@ -380,11 +411,20 @@ export const ordersPaths = {
               actions: ["get", "deny", "cancel"],
               deny_payload: {
                 deny_reason: {
-                  code: "OTHER",
-                  description: "Store is unable to fulfill the order"
-                },
-                info: {
-                  description: "Store is unable to fulfill the order"
+                  info: "Item is not available",
+                  type: "ITEM_ISSUE",
+                  client_error_code: "408",
+                  item_metadata: {
+                    invalid_item: [
+                      {
+                        id: "d3ffe8b6-ee90-11ed-a05b-0242ac120003chz_piz_18",
+                        type: "NOT_ON_MENU",
+                        client_error_code: "408",
+                        info: "Broken oven.",
+                        external_id: "chz_piz_18"
+                      }
+                    ]
+                  }
                 }
               },
               cancel_payload: {
