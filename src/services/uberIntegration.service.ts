@@ -53,6 +53,10 @@ export class UberIntegrationService {
           : typeof data.pos_integration_enabled === "boolean"
             ? data.pos_integration_enabled
             : undefined,
+      order_manager_client_id:
+        typeof data.order_manager_client_id === "string"
+          ? data.order_manager_client_id
+          : null,
       raw
     };
   }

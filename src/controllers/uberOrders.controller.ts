@@ -6,6 +6,7 @@ import {
   UberDenyOrderPayload,
   UberOrderValidationFlowPayload
 } from "../services/uberApi";
+import { getUberIntegrationService } from "../services/uberIntegration.service";
 
 function getSingleString(value: unknown): string | null {
   if (typeof value === "string") {
@@ -115,6 +116,85 @@ function safeParseJsonObject(value: unknown): Record<string, unknown> | null {
   }
 }
 
+async function validateOrderAccessForWrite(orderId: string): Promise<{
+  orderId: string;
+  storeId: string;
+  integrationEnabled?: boolean;
+  isOrderManager?: boolean;
+  orderManagerClientId?: string | null;
+  appClientId?: string | null;
+}> {
+  const uberApiService = getUberApiService();
+  const uberIntegrationService = getUberIntegrationService();
+
+  const order = await uberApiService.getOrderDetails(orderId);
+
+  const storeId =
+    order?.store?.id && typeof order.store.id === "string"
+      ? order.store.id.trim()
+      : null;
+
+  if (!storeId) {
+    throw new Error(
+      "No fue posible determinar el store.id de la orden. No se puede validar acceso."
+    );
+  }
+
+  const integration = await uberIntegrationService.getStoreIntegrationDetails(storeId);
+
+  const raw =
+    integration.raw && typeof integration.raw === "object" && !Array.isArray(integration.raw)
+      ? (integration.raw as Record<string, unknown>)
+      : {};
+
+  const orderManagerClientId =
+    typeof raw.order_manager_client_id === "string"
+      ? raw.order_manager_client_id
+      : integration.order_manager_client_id ?? null;
+
+  const appClientId =
+    typeof process.env.UBER_CLIENT_ID === "string" && process.env.UBER_CLIENT_ID.trim().length > 0
+      ? process.env.UBER_CLIENT_ID.trim()
+      : null;
+
+  console.log(chalk.magenta("=============================================="));
+  console.log(chalk.magenta("DEBUG VALIDATE ORDER ACCESS"));
+  console.log(chalk.magenta("=============================================="));
+  console.log(chalk.magenta(`orderId: ${orderId}`));
+  console.log(chalk.magenta(`storeId: ${storeId}`));
+  console.log(chalk.magenta(`integrationEnabled: ${String(integration.integration_enabled)}`));
+  console.log(chalk.magenta(`isOrderManager: ${String(integration.is_order_manager)}`));
+  console.log(chalk.magenta(`orderManagerClientId: ${orderManagerClientId ?? "null"}`));
+  console.log(chalk.magenta(`appClientId: ${appClientId ?? "null"}`));
+
+  if (integration.integration_enabled === false) {
+    throw new Error(
+      `La store ${storeId} tiene integration_enabled=false. La integración no está activa para operaciones de escritura.`
+    );
+  }
+
+  if (integration.is_order_manager !== true) {
+    throw new Error(
+      `La store ${storeId} no tiene is_order_manager=true para esta integración.`
+    );
+  }
+
+  if (appClientId && orderManagerClientId && appClientId !== orderManagerClientId) {
+    throw new Error(
+      `La app actual no es la order manager de la store ${storeId}. order_manager_client_id=${orderManagerClientId}, app_client_id=${appClientId}.`
+    );
+  }
+
+  return {
+    orderId,
+    storeId,
+    integrationEnabled: integration.integration_enabled,
+    isOrderManager: integration.is_order_manager,
+    orderManagerClientId,
+    appClientId
+  };
+}
+
 export async function getOrderDetails(req: Request, res: Response): Promise<void> {
   try {
     const orderId = resolveOrderId(req, res);
@@ -183,6 +263,8 @@ export async function acceptOrderManually(req: Request, res: Response): Promise<
   try {
     const orderId = resolveOrderId(req, res);
     if (!orderId) return;
+
+    await validateOrderAccessForWrite(orderId);
 
     const result = await getUberApiService().acceptOrder(orderId);
 
@@ -299,6 +381,24 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
     console.log(chalk.green("payload deny saneado enviado a Uber:"));
     console.log(JSON.stringify(payload, null, 2));
 
+    const validation = await validateOrderAccessForWrite(orderId);
+
+    console.log(chalk.green("Validación previa de acceso superada:"));
+    console.log(
+      JSON.stringify(
+        {
+          order_id: validation.orderId,
+          store_id: validation.storeId,
+          integration_enabled: validation.integrationEnabled,
+          is_order_manager: validation.isOrderManager,
+          order_manager_client_id: validation.orderManagerClientId,
+          app_client_id: validation.appClientId
+        },
+        null,
+        2
+      )
+    );
+
     const result = await getUberApiService().denyOrder(orderId, payload);
 
     res.status(200).json({
@@ -389,6 +489,8 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
     console.log(chalk.green("payload cancel saneado enviado a Uber:"));
     console.log(JSON.stringify(payload, null, 2));
 
+    await validateOrderAccessForWrite(orderId);
+
     const result = await getUberApiService().cancelOrder(orderId, payload);
 
     res.status(200).json({
@@ -418,6 +520,8 @@ export async function updateOrderManually(req: Request, res: Response): Promise<
       });
       return;
     }
+
+    await validateOrderAccessForWrite(orderId);
 
     const result = await getUberApiService().updateOrderCart(orderId, payload);
 

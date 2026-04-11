@@ -59,7 +59,20 @@ export interface UberStoreIntegrationDetails {
   integrator_brand_id: string | null;
   merchant_store_id: string | null;
   integration_enabled?: boolean;
+  order_manager_client_id?: string | null;
   raw?: unknown;
+}
+
+export interface UberStorePosDataResponse {
+  store_id?: string;
+  integration_enabled?: boolean;
+  pos_integration_enabled?: boolean;
+  is_order_manager?: boolean;
+  order_manager_client_id?: string | null;
+  integrator_store_id?: string | null;
+  integrator_brand_id?: string | null;
+  merchant_store_id?: string | null;
+  [key: string]: unknown;
 }
 
 export interface UberOpenTimePeriod {
