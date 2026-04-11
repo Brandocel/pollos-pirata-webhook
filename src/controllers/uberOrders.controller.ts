@@ -237,61 +237,62 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
 
     const rawPayload = normalizedBody as Record<string, unknown>;
 
-    const denyReason =
-      rawPayload.deny_reason &&
-      typeof rawPayload.deny_reason === "object" &&
-      !Array.isArray(rawPayload.deny_reason)
-        ? (rawPayload.deny_reason as Record<string, unknown>)
+    const reason =
+      rawPayload.reason &&
+      typeof rawPayload.reason === "object" &&
+      !Array.isArray(rawPayload.reason)
+        ? (rawPayload.reason as Record<string, unknown>)
         : null;
 
-    console.log(chalk.cyan("denyReason:"));
-    console.log(denyReason);
+    console.log(chalk.cyan("reason:"));
+    console.log(reason);
 
-    const info =
-      denyReason && typeof denyReason.info === "string"
-        ? denyReason.info.trim()
+    const explanation =
+      reason && typeof reason.explanation === "string"
+        ? reason.explanation.trim()
         : null;
 
-    const type =
-      denyReason && typeof denyReason.type === "string"
-        ? denyReason.type.trim()
+    const code =
+      reason && typeof reason.code === "string"
+        ? reason.code.trim()
         : null;
 
-    const clientErrorCode =
-      denyReason && typeof denyReason.client_error_code === "string"
-        ? denyReason.client_error_code.trim()
+    const outOfStockItems =
+      reason && Array.isArray(reason.out_of_stock_items)
+        ? reason.out_of_stock_items.filter((item): item is string => typeof item === "string")
         : undefined;
 
-    const itemMetadata =
-      denyReason &&
-      denyReason.item_metadata &&
-      typeof denyReason.item_metadata === "object" &&
-      !Array.isArray(denyReason.item_metadata)
-        ? (denyReason.item_metadata as UberDenyOrderPayload["deny_reason"]["item_metadata"])
+    const invalidItems =
+      reason && Array.isArray(reason.invalid_items)
+        ? reason.invalid_items.filter((item): item is string => typeof item === "string")
         : undefined;
 
-    if (!info) {
+    if (!explanation) {
       res.status(400).json({
         ok: false,
-        message: "El body es inválido. Debe incluir deny_reason.info"
+        message: "El body es inválido. Debe incluir reason.explanation"
       });
       return;
     }
 
-    if (!type) {
+    if (!code) {
       res.status(400).json({
         ok: false,
-        message: "El body es inválido. Debe incluir deny_reason.type"
+        message: "El body es inválido. Debe incluir reason.code"
       });
       return;
     }
 
     const payload: UberDenyOrderPayload = {
-      deny_reason: {
-        info,
-        type,
-        ...(clientErrorCode ? { client_error_code: clientErrorCode } : {}),
-        ...(itemMetadata ? { item_metadata: itemMetadata } : {})
+      reason: {
+        explanation,
+        code,
+        ...(outOfStockItems && outOfStockItems.length > 0
+          ? { out_of_stock_items: outOfStockItems }
+          : {}),
+        ...(invalidItems && invalidItems.length > 0
+          ? { invalid_items: invalidItems }
+          : {})
       }
     };
 

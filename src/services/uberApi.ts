@@ -4,23 +4,12 @@ import { UberOrderDetails } from "../types/uber";
 import { getUberAppTokenService } from "./uberAppToken.service";
 import { UberApiRequestError } from "./uberActivation.service";
 
-export interface UberInvalidItemMetadata {
-  id?: string;
-  type?: string;
-  client_error_code?: string;
-  info?: string;
-  external_id?: string;
-}
-
 export interface UberDenyOrderPayload {
-  deny_reason: {
-    info: string;
-    type: string;
-    client_error_code?: string;
-    item_metadata?: {
-      invalid_item?: UberInvalidItemMetadata[];
-      out_of_stock_item?: UberInvalidItemMetadata[];
-    };
+  reason: {
+    explanation: string;
+    code: string;
+    out_of_stock_items?: string[];
+    invalid_items?: string[];
   };
 }
 
@@ -124,20 +113,20 @@ export class UberOrdersService {
     return `${this.apiBaseUrl}/v1/delivery/order/${orderId}`;
   }
 
-  private buildDeliveryOrderAcceptUrl(orderId: string): string {
-    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/accept`;
+  private buildAcceptOrderUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/accept_pos_order`;
   }
 
-  private buildDeliveryOrderDenyUrl(orderId: string): string {
-    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/deny`;
+  private buildDenyOrderUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/deny_pos_order`;
   }
 
-  private buildDeliveryOrderCancelUrl(orderId: string): string {
-    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/cancel`;
+  private buildCancelOrderUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/cancel`;
   }
 
-  private buildDeliveryOrderCartUrl(orderId: string): string {
-    return `${this.apiBaseUrl}/v2/eats/orders/${orderId}/cart`;
+  private buildOrderCartUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/cart`;
   }
 
   private buildStoreOrdersUrl(storeId: string): string {
@@ -210,7 +199,7 @@ export class UberOrdersService {
 
   public async acceptOrder(orderId: string): Promise<unknown> {
     const token = await this.getOrderScopedToken();
-    const requestUrl = this.buildDeliveryOrderAcceptUrl(orderId);
+    const requestUrl = this.buildAcceptOrderUrl(orderId);
 
     try {
       console.log(chalk.cyan("=============================================="));
@@ -225,11 +214,21 @@ export class UberOrdersService {
           headers: {
             ...this.getAuthHeaders(token),
             "Content-Type": "application/json"
-          }
+          },
+          validateStatus: (status) => status >= 200 && status < 300
         }
       );
 
       console.log(chalk.green(`✓ Pedido aceptado correctamente ${orderId}`));
+
+      if (response.status === 204) {
+        return {
+          success: true,
+          status: 204,
+          message: "Uber devolvió 204 No Content"
+        };
+      }
+
       return response.data ?? {};
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
@@ -255,7 +254,7 @@ export class UberOrdersService {
     payload: UberDenyOrderPayload
   ): Promise<unknown> {
     const token = await this.getOrderScopedToken();
-    const requestUrl = this.buildDeliveryOrderDenyUrl(orderId);
+    const requestUrl = this.buildDenyOrderUrl(orderId);
 
     try {
       console.log(chalk.cyan("=============================================="));
@@ -272,11 +271,21 @@ export class UberOrdersService {
           headers: {
             ...this.getAuthHeaders(token),
             "Content-Type": "application/json"
-          }
+          },
+          validateStatus: (status) => status >= 200 && status < 300
         }
       );
 
       console.log(chalk.green(`✓ Pedido denegado correctamente ${orderId}`));
+
+      if (response.status === 204) {
+        return {
+          success: true,
+          status: 204,
+          message: "Uber devolvió 204 No Content"
+        };
+      }
+
       return response.data ?? {};
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
@@ -302,7 +311,7 @@ export class UberOrdersService {
     payload: UberCancelOrderPayload
   ): Promise<unknown> {
     const token = await this.getOrderScopedToken();
-    const requestUrl = this.buildDeliveryOrderCancelUrl(orderId);
+    const requestUrl = this.buildCancelOrderUrl(orderId);
 
     try {
       console.log(chalk.cyan("=============================================="));
@@ -319,11 +328,21 @@ export class UberOrdersService {
           headers: {
             ...this.getAuthHeaders(token),
             "Content-Type": "application/json"
-          }
+          },
+          validateStatus: (status) => status >= 200 && status < 300
         }
       );
 
       console.log(chalk.green(`✓ Pedido cancelado correctamente ${orderId}`));
+
+      if (response.status === 204) {
+        return {
+          success: true,
+          status: 204,
+          message: "Uber devolvió 204 No Content"
+        };
+      }
+
       return response.data ?? {};
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
@@ -349,7 +368,7 @@ export class UberOrdersService {
     payload: Record<string, unknown>
   ): Promise<unknown> {
     const token = await this.getOrderScopedToken();
-    const requestUrl = this.buildDeliveryOrderCartUrl(orderId);
+    const requestUrl = this.buildOrderCartUrl(orderId);
 
     try {
       const response = await this.http.patch(
@@ -418,12 +437,12 @@ export class UberOrdersService {
         }
 
         if (action === "deny") {
-          if (!payload.deny_payload?.deny_reason?.type) {
-            throw new Error("deny_payload.deny_reason.type es requerido para action=deny");
+          if (!payload.deny_payload?.reason?.explanation) {
+            throw new Error("deny_payload.reason.explanation es requerido para action=deny");
           }
 
-          if (!payload.deny_payload?.deny_reason?.info) {
-            throw new Error("deny_payload.deny_reason.info es requerido para action=deny");
+          if (!payload.deny_payload?.reason?.code) {
+            throw new Error("deny_payload.reason.code es requerido para action=deny");
           }
 
           const result = await this.denyOrder(orderId, payload.deny_payload);

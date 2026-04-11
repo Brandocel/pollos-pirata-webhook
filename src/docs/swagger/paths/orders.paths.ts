@@ -135,108 +135,93 @@ export const ordersPaths = {
     }
   },
 
-  "/uber/orders/{orderId}/deny": {
-    post: {
-      tags: ["Orders"],
-      summary: "Denegar pedido manualmente",
-      description: "Deniega el pedido usando POST /v1/delivery/order/{orderId}/deny",
-      parameters: [
-        {
-          name: "orderId",
-          in: "path",
-          required: true,
-          schema: {
-            type: "string"
-          }
-        }
-      ],
-      requestBody: {
+"/uber/orders/{orderId}/deny": {
+  post: {
+    tags: ["Orders"],
+    summary: "Denegar pedido manualmente",
+    description: "Deniega el pedido usando POST /v1/eats/orders/{orderId}/deny_pos_order",
+    parameters: [
+      {
+        name: "orderId",
+        in: "path",
         required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["deny_reason"],
-              properties: {
-                deny_reason: {
-                  type: "object",
-                  required: ["info", "type"],
-                  properties: {
-                    info: {
-                      type: "string",
-                      example: "Item is not available"
+        schema: {
+          type: "string"
+        }
+      }
+    ],
+    requestBody: {
+      required: true,
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            required: ["reason"],
+            properties: {
+              reason: {
+                type: "object",
+                required: ["explanation", "code"],
+                properties: {
+                  explanation: {
+                    type: "string",
+                    example: "failed to submit order"
+                  },
+                  code: {
+                    type: "string",
+                    example: "ITEM_AVAILABILITY"
+                  },
+                  out_of_stock_items: {
+                    type: "array",
+                    items: {
+                      type: "string"
                     },
-                    type: {
-                      type: "string",
-                      example: "ITEM_ISSUE"
+                    example: [
+                      "540cb880-0286-417b-9c6c-be586fd50f76",
+                      "094f3308-4389-4ce5-bf30-ce9e09c6ed1c"
+                    ]
+                  },
+                  invalid_items: {
+                    type: "array",
+                    items: {
+                      type: "string"
                     },
-                    client_error_code: {
-                      type: "string",
-                      example: "408"
-                    },
-                    item_metadata: {
-                      type: "object",
-                      properties: {
-                        invalid_item: {
-                          type: "array",
-                          items: {
-                            type: "object",
-                            properties: {
-                              id: { type: "string" },
-                              type: { type: "string", example: "NOT_ON_MENU" },
-                              client_error_code: { type: "string", example: "408" },
-                              info: { type: "string", example: "Broken oven." },
-                              external_id: { type: "string", example: "chz_piz_18" }
-                            }
-                          }
-                        },
-                        out_of_stock_item: {
-                          type: "array",
-                          items: {
-                            type: "object",
-                            properties: {
-                              id: { type: "string" },
-                              type: { type: "string", example: "OUT_OF_STOCK" },
-                              client_error_code: { type: "string", example: "408" },
-                              info: { type: "string", example: "Item unavailable." },
-                              external_id: { type: "string", example: "chz_piz_18" }
-                            }
-                          }
-                        }
-                      }
-                    }
+                    example: [
+                      "1cd26db9-6be3-4b0a-9216-e4868c5d79ec"
+                    ]
                   }
                 }
               }
-            },
-            example: {
-              deny_reason: {
-                info: "Item is not available",
-                type: "ITEM_ISSUE",
-                client_error_code: "408",
-                item_metadata: {
-                  invalid_item: [
-                    {
-                      id: "d3ffe8b6-ee90-11ed-a05b-0242ac120003chz_piz_18",
-                      type: "NOT_ON_MENU",
-                      client_error_code: "408",
-                      info: "Broken oven.",
-                      external_id: "chz_piz_18"
-                    }
-                  ]
-                }
-              }
+            }
+          },
+          example: {
+            reason: {
+              explanation: "failed to submit order",
+              code: "ITEM_AVAILABILITY",
+              out_of_stock_items: [
+                "540cb880-0286-417b-9c6c-be586fd50f76",
+                "094f3308-4389-4ce5-bf30-ce9e09c6ed1c"
+              ],
+              invalid_items: [
+                "1cd26db9-6be3-4b0a-9216-e4868c5d79ec"
+              ]
             }
           }
         }
+      }
+    },
+    responses: {
+      "200": {
+        description: "Pedido denegado correctamente"
       },
-      responses: {
-        "200": {
-          description: "Pedido denegado correctamente"
-        }
+      "204": {
+        description: "Uber devolvió No Content"
+      },
+      "401": {
+        description: "No autorizado para acceder a la store"
       }
     }
-  },
+  }
+},
 
   "/uber/orders/{orderId}/cancel": {
     post: {
