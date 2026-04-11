@@ -239,9 +239,9 @@ async function validateOrderAccessForWrite(orderId: string): Promise<{
     );
   }
 
-  if (integration.is_order_manager !== true) {
+  if (integration.is_order_manager === false) {
     throw new Error(
-      `La store ${storeId} no tiene is_order_manager=true para esta integración.`
+      `La store ${storeId} tiene is_order_manager=false para esta integración.`
     );
   }
 
