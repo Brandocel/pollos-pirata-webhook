@@ -4,7 +4,7 @@ export const ordersPaths = {
       tags: ["Orders"],
       summary: "Obtener detalle de una orden de Uber Eats",
       description:
-        "Obtiene el detalle completo de una orden usando delivery/order y fallback a eats/order.",
+        "Obtiene el detalle completo de una orden usando el endpoint de detalle configurado en la integración.",
       parameters: [
         {
           name: "orderId",
@@ -105,7 +105,7 @@ export const ordersPaths = {
     post: {
       tags: ["Orders"],
       summary: "Aceptar pedido manualmente",
-      description: "Acepta el pedido usando POST /v1/delivery/order/{orderId}/accept",
+      description: "Acepta el pedido usando POST /v1/eats/orders/{orderId}/accept_pos_order",
       parameters: [
         {
           name: "orderId",
@@ -122,7 +122,55 @@ export const ordersPaths = {
           "application/json": {
             schema: {
               type: "object",
-              example: {}
+              properties: {
+                reason: {
+                  type: "string",
+                  example: "Accepted by Rosie F."
+                },
+                pickup_time: {
+                  type: "integer",
+                  example: 1760000000
+                },
+                external_reference_id: {
+                  type: "string",
+                  example: "Check #146"
+                },
+                fields_relayed: {
+                  type: "object",
+                  properties: {
+                    order_special_instructions: {
+                      type: "boolean",
+                      example: true
+                    },
+                    item_special_instructions: {
+                      type: "boolean",
+                      example: true
+                    },
+                    item_special_requests: {
+                      type: "boolean",
+                      example: true
+                    },
+                    promotions: {
+                      type: "boolean",
+                      example: true
+                    }
+                  }
+                },
+                order_pickup_instructions: {
+                  type: "string",
+                  example: "The lobby is closed, please use the drive-thru lane"
+                }
+              }
+            },
+            example: {
+              reason: "Accepted by Rosie F.",
+              external_reference_id: "Check #146",
+              fields_relayed: {
+                order_special_instructions: true,
+                promotions: true
+              },
+              order_pickup_instructions:
+                "The lobby is closed, please use the drive-thru lane"
             }
           }
         }
@@ -130,104 +178,116 @@ export const ordersPaths = {
       responses: {
         "200": {
           description: "Pedido aceptado correctamente"
+        },
+        "204": {
+          description: "Uber devolvió No Content"
+        },
+        "401": {
+          description: "No autorizado"
+        },
+        "403": {
+          description: "Acceso denegado a la orden"
         }
       }
     }
   },
 
-"/uber/orders/{orderId}/deny": {
-  post: {
-    tags: ["Orders"],
-    summary: "Denegar pedido manualmente",
-    description: "Deniega el pedido usando POST /v1/eats/orders/{orderId}/deny_pos_order",
-    parameters: [
-      {
-        name: "orderId",
-        in: "path",
-        required: true,
-        schema: {
-          type: "string"
-        }
-      }
-    ],
-    requestBody: {
-      required: true,
-      content: {
-        "application/json": {
+  "/uber/orders/{orderId}/deny": {
+    post: {
+      tags: ["Orders"],
+      summary: "Denegar pedido manualmente",
+      description: "Deniega el pedido usando POST /v1/eats/orders/{orderId}/deny_pos_order",
+      parameters: [
+        {
+          name: "orderId",
+          in: "path",
+          required: true,
           schema: {
-            type: "object",
-            required: ["reason"],
-            properties: {
-              reason: {
-                type: "object",
-                required: ["explanation", "code"],
-                properties: {
-                  explanation: {
-                    type: "string",
-                    example: "failed to submit order"
-                  },
-                  code: {
-                    type: "string",
-                    example: "ITEM_AVAILABILITY"
-                  },
-                  out_of_stock_items: {
-                    type: "array",
-                    items: {
-                      type: "string"
+            type: "string"
+          }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["reason"],
+              properties: {
+                reason: {
+                  type: "object",
+                  required: ["explanation", "code"],
+                  properties: {
+                    explanation: {
+                      type: "string",
+                      example: "failed to submit order"
                     },
-                    example: [
-                      "540cb880-0286-417b-9c6c-be586fd50f76",
-                      "094f3308-4389-4ce5-bf30-ce9e09c6ed1c"
-                    ]
-                  },
-                  invalid_items: {
-                    type: "array",
-                    items: {
-                      type: "string"
+                    code: {
+                      type: "string",
+                      example: "ITEM_AVAILABILITY"
                     },
-                    example: [
-                      "1cd26db9-6be3-4b0a-9216-e4868c5d79ec"
-                    ]
+                    out_of_stock_items: {
+                      type: "array",
+                      items: {
+                        type: "string"
+                      },
+                      example: [
+                        "540cb880-0286-417b-9c6c-be586fd50f76",
+                        "094f3308-4389-4ce5-bf30-ce9e09c6ed1c"
+                      ]
+                    },
+                    invalid_items: {
+                      type: "array",
+                      items: {
+                        type: "string"
+                      },
+                      example: [
+                        "1cd26db9-6be3-4b0a-9216-e4868c5d79ec"
+                      ]
+                    }
                   }
                 }
               }
-            }
-          },
-          example: {
-            reason: {
-              explanation: "failed to submit order",
-              code: "ITEM_AVAILABILITY",
-              out_of_stock_items: [
-                "540cb880-0286-417b-9c6c-be586fd50f76",
-                "094f3308-4389-4ce5-bf30-ce9e09c6ed1c"
-              ],
-              invalid_items: [
-                "1cd26db9-6be3-4b0a-9216-e4868c5d79ec"
-              ]
+            },
+            example: {
+              reason: {
+                explanation: "failed to submit order",
+                code: "ITEM_AVAILABILITY",
+                out_of_stock_items: [
+                  "540cb880-0286-417b-9c6c-be586fd50f76",
+                  "094f3308-4389-4ce5-bf30-ce9e09c6ed1c"
+                ],
+                invalid_items: [
+                  "1cd26db9-6be3-4b0a-9216-e4868c5d79ec"
+                ]
+              }
             }
           }
         }
-      }
-    },
-    responses: {
-      "200": {
-        description: "Pedido denegado correctamente"
       },
-      "204": {
-        description: "Uber devolvió No Content"
-      },
-      "401": {
-        description: "No autorizado para acceder a la store"
+      responses: {
+        "200": {
+          description: "Pedido denegado correctamente"
+        },
+        "204": {
+          description: "Uber devolvió No Content"
+        },
+        "401": {
+          description: "No autorizado"
+        },
+        "403": {
+          description: "Acceso denegado a la orden"
+        }
       }
     }
-  }
-},
+  },
 
   "/uber/orders/{orderId}/cancel": {
     post: {
       tags: ["Orders"],
       summary: "Cancelar pedido manualmente",
-      description: "Cancela el pedido usando POST /v1/delivery/order/{orderId}/cancel",
+      description: "Cancela el pedido usando POST /v1/eats/orders/{orderId}/cancel",
       parameters: [
         {
           name: "orderId",
@@ -274,6 +334,9 @@ export const ordersPaths = {
       responses: {
         "200": {
           description: "Pedido cancelado correctamente"
+        },
+        "204": {
+          description: "Uber devolvió No Content"
         }
       }
     }
@@ -341,28 +404,71 @@ export const ordersPaths = {
                     enum: ["get", "accept", "deny", "cancel", "update"]
                   }
                 },
+                accept_payload: {
+                  type: "object",
+                  properties: {
+                    reason: {
+                      type: "string",
+                      example: "Accepted by Rosie F."
+                    },
+                    pickup_time: {
+                      type: "integer",
+                      example: 1760000000
+                    },
+                    external_reference_id: {
+                      type: "string",
+                      example: "Check #146"
+                    },
+                    fields_relayed: {
+                      type: "object",
+                      properties: {
+                        order_special_instructions: {
+                          type: "boolean"
+                        },
+                        item_special_instructions: {
+                          type: "boolean"
+                        },
+                        item_special_requests: {
+                          type: "boolean"
+                        },
+                        promotions: {
+                          type: "boolean"
+                        }
+                      }
+                    },
+                    order_pickup_instructions: {
+                      type: "string",
+                      example: "The lobby is closed, please use the drive-thru lane"
+                    }
+                  }
+                },
                 deny_payload: {
                   type: "object",
-                  required: ["deny_reason"],
+                  required: ["reason"],
                   properties: {
-                    deny_reason: {
+                    reason: {
                       type: "object",
-                      required: ["info", "type"],
+                      required: ["explanation", "code"],
                       properties: {
-                        info: {
+                        explanation: {
                           type: "string",
-                          example: "Item is not available"
+                          example: "failed to submit order"
                         },
-                        type: {
+                        code: {
                           type: "string",
-                          example: "ITEM_ISSUE"
+                          example: "ITEM_AVAILABILITY"
                         },
-                        client_error_code: {
-                          type: "string",
-                          example: "408"
+                        out_of_stock_items: {
+                          type: "array",
+                          items: {
+                            type: "string"
+                          }
                         },
-                        item_metadata: {
-                          type: "object"
+                        invalid_items: {
+                          type: "array",
+                          items: {
+                            type: "string"
+                          }
                         }
                       }
                     }
@@ -393,29 +499,27 @@ export const ordersPaths = {
               }
             },
             example: {
-              actions: ["get", "deny", "cancel"],
-              deny_payload: {
-                deny_reason: {
-                  info: "Item is not available",
-                  type: "ITEM_ISSUE",
-                  client_error_code: "408",
-                  item_metadata: {
-                    invalid_item: [
-                      {
-                        id: "d3ffe8b6-ee90-11ed-a05b-0242ac120003chz_piz_18",
-                        type: "NOT_ON_MENU",
-                        client_error_code: "408",
-                        info: "Broken oven.",
-                        external_id: "chz_piz_18"
-                      }
-                    ]
-                  }
-                }
+              actions: ["get", "accept", "deny"],
+              accept_payload: {
+                reason: "Accepted by Rosie F.",
+                external_reference_id: "Check #146",
+                fields_relayed: {
+                  order_special_instructions: true,
+                  promotions: true
+                },
+                order_pickup_instructions:
+                  "The lobby is closed, please use the drive-thru lane"
               },
-              cancel_payload: {
-                cancellation_reason: {
-                  code: "CUSTOMER_CALLED_TO_CANCEL",
-                  description: "Customer requested cancellation by phone"
+              deny_payload: {
+                reason: {
+                  explanation: "failed to submit order",
+                  code: "ITEM_AVAILABILITY",
+                  out_of_stock_items: [
+                    "540cb880-0286-417b-9c6c-be586fd50f76"
+                  ],
+                  invalid_items: [
+                    "1cd26db9-6be3-4b0a-9216-e4868c5d79ec"
+                  ]
                 }
               }
             }

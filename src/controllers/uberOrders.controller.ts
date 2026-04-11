@@ -330,9 +330,97 @@ export async function acceptOrderManually(req: Request, res: Response): Promise<
     const orderId = resolveOrderId(req, res);
     if (!orderId) return;
 
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan("DEBUG ACCEPT ORDER"));
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan(`orderId: ${orderId}`));
+    console.log(chalk.cyan(`typeof req.body: ${typeof req.body}`));
+    console.log(chalk.cyan("req.body crudo:"));
+    console.log(req.body);
+
+    const parsedFromString = safeParseJsonObject(req.body);
+
+    if (parsedFromString) {
+      console.log(chalk.yellow("req.body llegó como string JSON; se parseó correctamente."));
+    }
+
+    const normalizedBody =
+      parsedFromString ??
+      (req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {});
+
+    console.log(chalk.cyan("normalizedBody accept:"));
+    console.log(normalizedBody);
+
+    const rawPayload = normalizedBody as Record<string, unknown>;
+
+    const reason =
+      typeof rawPayload.reason === "string" && rawPayload.reason.trim().length > 0
+        ? rawPayload.reason.trim()
+        : undefined;
+
+    const pickupTime =
+      typeof rawPayload.pickup_time === "number" && Number.isFinite(rawPayload.pickup_time)
+        ? rawPayload.pickup_time
+        : typeof rawPayload.pickup_time === "string" && rawPayload.pickup_time.trim() !== ""
+          ? Number(rawPayload.pickup_time)
+          : undefined;
+
+    const externalReferenceId =
+      typeof rawPayload.external_reference_id === "string" &&
+      rawPayload.external_reference_id.trim().length > 0
+        ? rawPayload.external_reference_id.trim()
+        : undefined;
+
+    const fieldsRelayed =
+      rawPayload.fields_relayed &&
+      typeof rawPayload.fields_relayed === "object" &&
+      !Array.isArray(rawPayload.fields_relayed)
+        ? (rawPayload.fields_relayed as Record<string, unknown>)
+        : undefined;
+
+    const orderPickupInstructions =
+      typeof rawPayload.order_pickup_instructions === "string" &&
+      rawPayload.order_pickup_instructions.trim().length > 0
+        ? rawPayload.order_pickup_instructions.trim()
+        : undefined;
+
+    const payload = {
+      ...(reason ? { reason } : {}),
+      ...(typeof pickupTime === "number" && Number.isFinite(pickupTime)
+        ? { pickup_time: pickupTime }
+        : {}),
+      ...(externalReferenceId ? { external_reference_id: externalReferenceId } : {}),
+      ...(fieldsRelayed
+        ? {
+            fields_relayed: {
+              ...(typeof fieldsRelayed.order_special_instructions === "boolean"
+                ? { order_special_instructions: fieldsRelayed.order_special_instructions }
+                : {}),
+              ...(typeof fieldsRelayed.item_special_instructions === "boolean"
+                ? { item_special_instructions: fieldsRelayed.item_special_instructions }
+                : {}),
+              ...(typeof fieldsRelayed.item_special_requests === "boolean"
+                ? { item_special_requests: fieldsRelayed.item_special_requests }
+                : {}),
+              ...(typeof fieldsRelayed.promotions === "boolean"
+                ? { promotions: fieldsRelayed.promotions }
+                : {})
+            }
+          }
+        : {}),
+      ...(orderPickupInstructions
+        ? { order_pickup_instructions: orderPickupInstructions }
+        : {})
+    };
+
+    console.log(chalk.green("payload accept saneado enviado a Uber:"));
+    console.log(JSON.stringify(payload, null, 2));
+
     await validateOrderAccessForWrite(orderId);
 
-    const result = await getUberApiService().acceptOrder(orderId);
+    const result = await getUberApiService().acceptOrder(orderId, payload);
 
     res.status(200).json({
       ok: true,

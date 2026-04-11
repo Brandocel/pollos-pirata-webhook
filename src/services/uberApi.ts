@@ -4,6 +4,19 @@ import { UberOrderDetails } from "../types/uber";
 import { getUberAppTokenService } from "./uberAppToken.service";
 import { UberApiRequestError } from "./uberActivation.service";
 
+export interface UberAcceptOrderPayload {
+  reason?: string;
+  pickup_time?: number;
+  external_reference_id?: string;
+  fields_relayed?: {
+    order_special_instructions?: boolean;
+    item_special_instructions?: boolean;
+    item_special_requests?: boolean;
+    promotions?: boolean;
+  };
+  order_pickup_instructions?: string;
+}
+
 export interface UberDenyOrderPayload {
   reason: {
     explanation: string;
@@ -31,6 +44,7 @@ export interface UberListStoreOrdersQuery {
 
 export interface UberOrderValidationFlowPayload {
   actions: Array<"get" | "accept" | "deny" | "cancel" | "update">;
+  accept_payload?: UberAcceptOrderPayload;
   deny_payload?: UberDenyOrderPayload;
   cancel_payload?: UberCancelOrderPayload;
   update_payload?: Record<string, unknown>;
@@ -197,7 +211,10 @@ export class UberOrdersService {
     }
   }
 
-  public async acceptOrder(orderId: string): Promise<unknown> {
+  public async acceptOrder(
+    orderId: string,
+    payload?: UberAcceptOrderPayload
+  ): Promise<unknown> {
     const token = await this.getOrderScopedToken();
     const requestUrl = this.buildAcceptOrderUrl(orderId);
 
@@ -206,10 +223,12 @@ export class UberOrdersService {
       console.log(chalk.cyan("DEBUG SERVICE ACCEPT ORDER"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+      console.log(chalk.cyan("payload accept hacia Uber:"));
+      console.log(JSON.stringify(payload ?? {}, null, 2));
 
       const response = await this.http.post(
         requestUrl,
-        {},
+        payload ?? {},
         {
           headers: {
             ...this.getAuthHeaders(token),
@@ -431,7 +450,7 @@ export class UberOrdersService {
         }
 
         if (action === "accept") {
-          const result = await this.acceptOrder(orderId);
+          const result = await this.acceptOrder(orderId, payload.accept_payload);
           steps.push({ action, ok: true, result });
           continue;
         }
