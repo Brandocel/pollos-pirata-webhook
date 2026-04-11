@@ -127,33 +127,55 @@ async function validateOrderAccessForWrite(orderId: string): Promise<{
   const uberApiService = getUberApiService();
   const uberIntegrationService = getUberIntegrationService();
 
-  const order = await uberApiService.getOrderDetails(orderId);
+  const orderResponse = await uberApiService.getOrderDetails(orderId);
 
   console.log(chalk.magenta("=============================================="));
   console.log(chalk.magenta("DEBUG ORDER DETAILS FOR ACCESS VALIDATION"));
   console.log(chalk.magenta("=============================================="));
-  console.log(chalk.magenta(JSON.stringify(order, null, 2)));
+  console.log(chalk.magenta(JSON.stringify(orderResponse, null, 2)));
+
+  const root =
+    orderResponse && typeof orderResponse === "object" && !Array.isArray(orderResponse)
+      ? (orderResponse as unknown as Record<string, unknown>)
+      : {};
+
+  const embeddedOrder =
+    root["order"] && typeof root["order"] === "object" && !Array.isArray(root["order"])
+      ? (root["order"] as Record<string, unknown>)
+      : null;
+
+  const normalizedOrder =
+    embeddedOrder ??
+    (orderResponse && typeof orderResponse === "object" && !Array.isArray(orderResponse)
+      ? (orderResponse as unknown as Record<string, unknown>)
+      : null);
+
+  if (!normalizedOrder) {
+    throw new Error("La respuesta de detalle de orden no tiene un formato válido.");
+  }
 
   const storeObject =
-    order?.store && typeof order.store === "object" && !Array.isArray(order.store)
-      ? (order.store as Record<string, unknown>)
+    normalizedOrder["store"] &&
+    typeof normalizedOrder["store"] === "object" &&
+    !Array.isArray(normalizedOrder["store"])
+      ? (normalizedOrder["store"] as Record<string, unknown>)
       : null;
 
   const rawOrder =
-    order?.raw && typeof order.raw === "object" && !Array.isArray(order.raw)
-      ? (order.raw as Record<string, unknown>)
+    normalizedOrder["raw"] &&
+    typeof normalizedOrder["raw"] === "object" &&
+    !Array.isArray(normalizedOrder["raw"])
+      ? (normalizedOrder["raw"] as Record<string, unknown>)
       : null;
 
   const rawStore =
-    rawOrder?.store && typeof rawOrder.store === "object" && !Array.isArray(rawOrder.store)
-      ? (rawOrder.store as Record<string, unknown>)
+    rawOrder?.["store"] &&
+    typeof rawOrder["store"] === "object" &&
+    !Array.isArray(rawOrder["store"])
+      ? (rawOrder["store"] as Record<string, unknown>)
       : null;
 
   const possibleStoreId =
-    (typeof order?.store?.id === "string" && order.store.id.trim()) ||
-    (typeof order?.store?.store_id === "string" && order.store.store_id.trim()) ||
-    (typeof order?.store?.merchant_store_id === "string" && order.store.merchant_store_id.trim()) ||
-    (typeof order?.store?.integrator_store_id === "string" && order.store.integrator_store_id.trim()) ||
     (storeObject && typeof storeObject["id"] === "string" && String(storeObject["id"]).trim()) ||
     (storeObject &&
       typeof storeObject["store_id"] === "string" &&
@@ -192,8 +214,8 @@ async function validateOrderAccessForWrite(orderId: string): Promise<{
       : {};
 
   const orderManagerClientId =
-    typeof raw.order_manager_client_id === "string"
-      ? raw.order_manager_client_id
+    typeof raw["order_manager_client_id"] === "string"
+      ? String(raw["order_manager_client_id"]).trim()
       : integration.order_manager_client_id ?? null;
 
   const appClientId =
