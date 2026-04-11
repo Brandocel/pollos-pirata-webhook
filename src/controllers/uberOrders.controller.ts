@@ -129,16 +129,60 @@ async function validateOrderAccessForWrite(orderId: string): Promise<{
 
   const order = await uberApiService.getOrderDetails(orderId);
 
-  const storeId =
-    order?.store?.id && typeof order.store.id === "string"
-      ? order.store.id.trim()
+  console.log(chalk.magenta("=============================================="));
+  console.log(chalk.magenta("DEBUG ORDER DETAILS FOR ACCESS VALIDATION"));
+  console.log(chalk.magenta("=============================================="));
+  console.log(chalk.magenta(JSON.stringify(order, null, 2)));
+
+  const storeObject =
+    order?.store && typeof order.store === "object" && !Array.isArray(order.store)
+      ? (order.store as Record<string, unknown>)
       : null;
 
-  if (!storeId) {
+  const rawOrder =
+    order?.raw && typeof order.raw === "object" && !Array.isArray(order.raw)
+      ? (order.raw as Record<string, unknown>)
+      : null;
+
+  const rawStore =
+    rawOrder?.store && typeof rawOrder.store === "object" && !Array.isArray(rawOrder.store)
+      ? (rawOrder.store as Record<string, unknown>)
+      : null;
+
+  const possibleStoreId =
+    (typeof order?.store?.id === "string" && order.store.id.trim()) ||
+    (typeof order?.store?.store_id === "string" && order.store.store_id.trim()) ||
+    (typeof order?.store?.merchant_store_id === "string" && order.store.merchant_store_id.trim()) ||
+    (typeof order?.store?.integrator_store_id === "string" && order.store.integrator_store_id.trim()) ||
+    (storeObject && typeof storeObject["id"] === "string" && String(storeObject["id"]).trim()) ||
+    (storeObject &&
+      typeof storeObject["store_id"] === "string" &&
+      String(storeObject["store_id"]).trim()) ||
+    (storeObject &&
+      typeof storeObject["merchant_store_id"] === "string" &&
+      String(storeObject["merchant_store_id"]).trim()) ||
+    (storeObject &&
+      typeof storeObject["integrator_store_id"] === "string" &&
+      String(storeObject["integrator_store_id"]).trim()) ||
+    (rawStore && typeof rawStore["id"] === "string" && String(rawStore["id"]).trim()) ||
+    (rawStore &&
+      typeof rawStore["store_id"] === "string" &&
+      String(rawStore["store_id"]).trim()) ||
+    (rawStore &&
+      typeof rawStore["merchant_store_id"] === "string" &&
+      String(rawStore["merchant_store_id"]).trim()) ||
+    (rawStore &&
+      typeof rawStore["integrator_store_id"] === "string" &&
+      String(rawStore["integrator_store_id"]).trim()) ||
+    null;
+
+  if (!possibleStoreId) {
     throw new Error(
-      "No fue posible determinar el store.id de la orden. No se puede validar acceso."
+      "No fue posible determinar el store.id de la orden. Revisa el log DEBUG ORDER DETAILS FOR ACCESS VALIDATION para ver qué campo regresó Uber."
     );
   }
+
+  const storeId = possibleStoreId;
 
   const integration = await uberIntegrationService.getStoreIntegrationDetails(storeId);
 

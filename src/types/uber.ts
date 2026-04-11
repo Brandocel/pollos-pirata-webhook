@@ -216,11 +216,13 @@ export interface UberPayment {
 
 export interface UberStoreReference {
   id?: string;
+  store_id?: string;
   name?: string;
   external_reference_id?: string;
   integrator_store_id?: string;
   integrator_brand_id?: string;
   merchant_store_id?: string;
+  [key: string]: unknown;
 }
 
 export interface UberOrderDetails {
