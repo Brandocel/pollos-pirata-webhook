@@ -103,7 +103,7 @@ export function getPrivacyPage(_req: Request, res: Response): void {
           <p>
             Para dudas relacionadas con privacidad, soporte técnico o esta
             integración, puedes contactar a:
-            <strong>castanedalopezana@yahoo.com</strong>
+            <strong>castanedalopezana@yahoo.com.mx</strong>
           </p>
         </div>
       </body>
