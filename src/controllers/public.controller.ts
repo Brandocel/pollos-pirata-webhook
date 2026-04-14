@@ -48,7 +48,7 @@ export function getPrivacyPage(_req: Request, res: Response): void {
 
           <p>
             Esta Política de Privacidad describe cómo el sistema de integración de
-            <strong>Pollos Pirata</strong> utiliza y protege la información procesada
+            <strong>Pollo Pirata</strong> utiliza y protege la información procesada
             a través de la conexión con <strong>Uber Eats Marketplace</strong>.
           </p>
 
