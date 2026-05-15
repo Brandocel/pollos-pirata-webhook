@@ -27,10 +27,8 @@ export interface UberDenyOrderPayload {
 }
 
 export interface UberCancelOrderPayload {
-  cancellation_reason: {
-    code: string;
-    description?: string;
-  };
+  reason: string;
+  details?: string;
 }
 
 export interface UberListStoreOrdersQuery {
@@ -168,6 +166,12 @@ export class UberOrdersService {
 
   /**
    * Order: Cancel Order (uAPI)
+   *
+   * Body oficial esperado por Uber:
+   * {
+   *   "reason": "CUSTOMER_CALLED_TO_CANCEL",
+   *   "details": "Cancel order uAPI validation test from POS integration"
+   * }
    */
   private buildCancelOrderUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/cancel`;
@@ -200,7 +204,9 @@ export class UberOrdersService {
 
       return response.data;
     } catch (primaryError: unknown) {
-      console.log(chalk.yellow("No se pudo obtener la orden con endpoint delivery. Intentando fallback Eats..."));
+      console.log(
+        chalk.yellow("No se pudo obtener la orden con endpoint delivery. Intentando fallback Eats...")
+      );
 
       if (axios.isAxiosError(primaryError)) {
         console.log(chalk.yellow(`Primary status: ${primaryError.response?.status ?? "N/A"}`));
@@ -515,10 +521,8 @@ export class UberOrdersService {
         }
 
         if (action === "cancel") {
-          if (!payload.cancel_payload?.cancellation_reason?.code) {
-            throw new Error(
-              "cancel_payload.cancellation_reason.code es requerido para action=cancel"
-            );
+          if (!payload.cancel_payload?.reason) {
+            throw new Error("cancel_payload.reason es requerido para action=cancel");
           }
 
           const result = await this.cancelOrder(orderId, payload.cancel_payload);
