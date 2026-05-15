@@ -58,6 +58,7 @@ export class UberOrdersService {
     const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
 
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
+
     this.http = axios.create({
       timeout: 20000,
       headers: {
@@ -123,18 +124,51 @@ export class UberOrdersService {
     };
   }
 
+  private normalizeUberResponse(status: number, data: unknown): unknown {
+    if (status === 204) {
+      return {
+        success: true,
+        status: 204,
+        message: "Uber devolvió 204 No Content"
+      };
+    }
+
+    return data ?? {};
+  }
+
+  /**
+   * Se mantiene tu endpoint actual para no romper comportamiento existente.
+   */
   private buildDeliveryOrderUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v1/delivery/order/${orderId}`;
   }
 
+  /**
+   * Fallback para obtener detalle de orden en formato Eats.
+   * Esto ayuda al flujo de accept/deny/cancel porque tu controller valida la orden
+   * antes de ejecutar la acción.
+   */
+  private buildEatsOrderDetailsUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v2/eats/order/${orderId}`;
+  }
+
+  /**
+   * Order: Accept Order (uAPI)
+   */
   private buildAcceptOrderUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/accept_pos_order`;
   }
 
+  /**
+   * Order: Deny Order (uAPI)
+   */
   private buildDenyOrderUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/deny_pos_order`;
   }
 
+  /**
+   * Order: Cancel Order (uAPI)
+   */
   private buildCancelOrderUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/cancel`;
   }
@@ -149,31 +183,66 @@ export class UberOrdersService {
 
   public async getOrderDetails(orderId: string): Promise<UberOrderDetails> {
     const token = await this.getOrderScopedToken();
-    const requestUrl = this.buildDeliveryOrderUrl(orderId);
+    const primaryRequestUrl = this.buildDeliveryOrderUrl(orderId);
+    const fallbackRequestUrl = this.buildEatsOrderDetailsUrl(orderId);
 
     try {
-      const response = await this.http.get<UberOrderDetails>(requestUrl, {
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan("DEBUG SERVICE GET ORDER DETAILS"));
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan(`primaryRequestUrl: ${primaryRequestUrl}`));
+
+      const response = await this.http.get<UberOrderDetails>(primaryRequestUrl, {
         headers: this.getAuthHeaders(token)
       });
 
       console.log(chalk.green(`✓ Detalle de orden obtenido correctamente para ${orderId}`));
+
       return response.data;
-    } catch (error: unknown) {
-      if (axios.isAxiosError(error)) {
-        throw this.buildAxiosError(
-          error,
-          `No fue posible obtener el detalle de la orden ${orderId}`,
-          requestUrl
+    } catch (primaryError: unknown) {
+      console.log(chalk.yellow("No se pudo obtener la orden con endpoint delivery. Intentando fallback Eats..."));
+
+      if (axios.isAxiosError(primaryError)) {
+        console.log(chalk.yellow(`Primary status: ${primaryError.response?.status ?? "N/A"}`));
+        console.log(
+          chalk.yellow(
+            `Primary response: ${JSON.stringify(primaryError.response?.data ?? {}, null, 2)}`
+          )
         );
       }
 
-      throw new UberApiRequestError(
-        `No fue posible obtener el detalle de la orden ${orderId}`,
-        500,
-        null,
-        "server",
-        requestUrl
-      );
+      try {
+        console.log(chalk.cyan(`fallbackRequestUrl: ${fallbackRequestUrl}`));
+
+        const fallbackResponse = await this.http.get<UberOrderDetails>(
+          fallbackRequestUrl,
+          {
+            headers: this.getAuthHeaders(token)
+          }
+        );
+
+        console.log(
+          chalk.green(`✓ Detalle de orden obtenido correctamente con fallback para ${orderId}`)
+        );
+
+        return fallbackResponse.data;
+      } catch (fallbackError: unknown) {
+        if (axios.isAxiosError(fallbackError)) {
+          throw this.buildAxiosError(
+            fallbackError,
+            `No fue posible obtener el detalle de la orden ${orderId}`,
+            fallbackRequestUrl
+          );
+        }
+
+        throw new UberApiRequestError(
+          `No fue posible obtener el detalle de la orden ${orderId}`,
+          500,
+          null,
+          "server",
+          fallbackRequestUrl
+        );
+      }
     }
   }
 
@@ -185,12 +254,19 @@ export class UberOrdersService {
     const requestUrl = this.buildStoreOrdersUrl(storeId);
 
     try {
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan("DEBUG SERVICE LIST STORE ORDERS"));
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+      console.log(chalk.cyan(`query: ${JSON.stringify(query ?? {}, null, 2)}`));
+
       const response = await this.http.get(requestUrl, {
         headers: this.getAuthHeaders(token),
         params: query ?? {}
       });
 
       console.log(chalk.green(`✓ Lista de órdenes obtenida correctamente para store ${storeId}`));
+
       return response.data;
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
@@ -226,29 +302,17 @@ export class UberOrdersService {
       console.log(chalk.cyan("payload accept hacia Uber:"));
       console.log(JSON.stringify(payload ?? {}, null, 2));
 
-      const response = await this.http.post(
-        requestUrl,
-        payload ?? {},
-        {
-          headers: {
-            ...this.getAuthHeaders(token),
-            "Content-Type": "application/json"
-          },
-          validateStatus: (status) => status >= 200 && status < 300
-        }
-      );
+      const response = await this.http.post(requestUrl, payload ?? {}, {
+        headers: {
+          ...this.getAuthHeaders(token),
+          "Content-Type": "application/json"
+        },
+        validateStatus: (status) => status >= 200 && status < 300
+      });
 
       console.log(chalk.green(`✓ Pedido aceptado correctamente ${orderId}`));
 
-      if (response.status === 204) {
-        return {
-          success: true,
-          status: 204,
-          message: "Uber devolvió 204 No Content"
-        };
-      }
-
-      return response.data ?? {};
+      return this.normalizeUberResponse(response.status, response.data);
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         throw this.buildAxiosError(
@@ -283,29 +347,17 @@ export class UberOrdersService {
       console.log(chalk.cyan("payload deny hacia Uber:"));
       console.log(JSON.stringify(payload, null, 2));
 
-      const response = await this.http.post(
-        requestUrl,
-        payload,
-        {
-          headers: {
-            ...this.getAuthHeaders(token),
-            "Content-Type": "application/json"
-          },
-          validateStatus: (status) => status >= 200 && status < 300
-        }
-      );
+      const response = await this.http.post(requestUrl, payload, {
+        headers: {
+          ...this.getAuthHeaders(token),
+          "Content-Type": "application/json"
+        },
+        validateStatus: (status) => status >= 200 && status < 300
+      });
 
       console.log(chalk.green(`✓ Pedido denegado correctamente ${orderId}`));
 
-      if (response.status === 204) {
-        return {
-          success: true,
-          status: 204,
-          message: "Uber devolvió 204 No Content"
-        };
-      }
-
-      return response.data ?? {};
+      return this.normalizeUberResponse(response.status, response.data);
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         throw this.buildAxiosError(
@@ -340,29 +392,17 @@ export class UberOrdersService {
       console.log(chalk.cyan("payload cancel hacia Uber:"));
       console.log(JSON.stringify(payload, null, 2));
 
-      const response = await this.http.post(
-        requestUrl,
-        payload,
-        {
-          headers: {
-            ...this.getAuthHeaders(token),
-            "Content-Type": "application/json"
-          },
-          validateStatus: (status) => status >= 200 && status < 300
-        }
-      );
+      const response = await this.http.post(requestUrl, payload, {
+        headers: {
+          ...this.getAuthHeaders(token),
+          "Content-Type": "application/json"
+        },
+        validateStatus: (status) => status >= 200 && status < 300
+      });
 
       console.log(chalk.green(`✓ Pedido cancelado correctamente ${orderId}`));
 
-      if (response.status === 204) {
-        return {
-          success: true,
-          status: 204,
-          message: "Uber devolvió 204 No Content"
-        };
-      }
-
-      return response.data ?? {};
+      return this.normalizeUberResponse(response.status, response.data);
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         throw this.buildAxiosError(
@@ -390,19 +430,24 @@ export class UberOrdersService {
     const requestUrl = this.buildOrderCartUrl(orderId);
 
     try {
-      const response = await this.http.patch(
-        requestUrl,
-        payload,
-        {
-          headers: {
-            ...this.getAuthHeaders(token),
-            "Content-Type": "application/json"
-          }
-        }
-      );
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan("DEBUG SERVICE UPDATE ORDER CART"));
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+      console.log(chalk.cyan("payload update cart hacia Uber:"));
+      console.log(JSON.stringify(payload, null, 2));
+
+      const response = await this.http.patch(requestUrl, payload, {
+        headers: {
+          ...this.getAuthHeaders(token),
+          "Content-Type": "application/json"
+        },
+        validateStatus: (status) => status >= 200 && status < 300
+      });
 
       console.log(chalk.green(`✓ Pedido actualizado correctamente ${orderId}`));
-      return response.data ?? {};
+
+      return this.normalizeUberResponse(response.status, response.data);
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         throw this.buildAxiosError(
