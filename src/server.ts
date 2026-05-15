@@ -10,6 +10,7 @@ import uberMenuRoutes from "./routes/uberMenu.routes";
 import uberOrdersRoutes from "./routes/uberOrders.routes";
 import publicRoutes from "./routes/public.routes";
 import { setupSwagger } from "./docs/swagger";
+import uberPromotionsRoutes from "./routes/uberPromotions.routes";
 
 const app: Application = express();
 const port = Number(process.env.PORT || 3000);
@@ -104,6 +105,8 @@ app.use("/uber", uberIntegrationRoutes);
 app.use("/uber", uberStoreRoutes);
 app.use("/uber", uberMenuRoutes);
 app.use("/uber", uberOrdersRoutes);
+
+app.use("/uber", uberPromotionsRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
