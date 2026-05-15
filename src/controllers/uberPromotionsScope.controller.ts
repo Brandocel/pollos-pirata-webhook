@@ -61,18 +61,18 @@ function sendDetailedError(
   });
 }
 
-export async function testPromotionsWriteScope(
+export async function testPromotionWriteScope(
   _req: Request,
   res: Response
 ): Promise<void> {
   try {
-    const scope = "eats.store.promotions.write";
+    const scope = "eats.store.promotion.write";
 
     await getUberAppTokenService().getAccessToken([scope]);
 
     return void res.status(200).json({
       ok: true,
-      message: "Scope de promociones write autorizado correctamente",
+      message: "Scope de promoción write autorizado correctamente",
       data: {
         scope,
         token_obtained: true
@@ -81,27 +81,27 @@ export async function testPromotionsWriteScope(
   } catch (error: unknown) {
     return sendDetailedError(
       res,
-      "No fue posible obtener token con scope de promociones write",
+      "No fue posible obtener token con scope de promoción write",
       error,
       {
-        scope: "eats.store.promotions.write"
+        scope: "eats.store.promotion.write"
       }
     );
   }
 }
 
-export async function testPromotionsReadScope(
+export async function testPromotionReadScope(
   _req: Request,
   res: Response
 ): Promise<void> {
   try {
-    const scope = "eats.store.promotions.read";
+    const scope = "eats.store.promotion.read";
 
     await getUberAppTokenService().getAccessToken([scope]);
 
     return void res.status(200).json({
       ok: true,
-      message: "Scope de promociones read autorizado correctamente",
+      message: "Scope de promoción read autorizado correctamente",
       data: {
         scope,
         token_obtained: true
@@ -110,10 +110,10 @@ export async function testPromotionsReadScope(
   } catch (error: unknown) {
     return sendDetailedError(
       res,
-      "No fue posible obtener token con scope de promociones read",
+      "No fue posible obtener token con scope de promoción read",
       error,
       {
-        scope: "eats.store.promotions.read"
+        scope: "eats.store.promotion.read"
       }
     );
   }

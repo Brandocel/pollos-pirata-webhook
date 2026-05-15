@@ -3,8 +3,8 @@ import chalk from "chalk";
 import { UberApiRequestError } from "../services/uberActivation.service";
 import {
   getUberPromotionsService,
-  UberPromotionCreatePayload,
-  UberPromotionListQuery
+  UberCreatePromotionPayload,
+  UberListPromotionsQuery
 } from "../services/uberPromotions.service";
 
 function sendDetailedError(
@@ -101,31 +101,45 @@ function isNonArrayObject(value: unknown): value is Record<string, unknown> {
 
 function normalizeCreatePromotionPayload(
   body: unknown
-): UberPromotionCreatePayload | null {
+): UberCreatePromotionPayload | null {
   if (!isNonArrayObject(body)) {
     return null;
   }
 
-  return body as UberPromotionCreatePayload;
+  const payload = body as Record<string, unknown>;
+
+  if (typeof payload.start_time !== "string") {
+    return null;
+  }
+
+  if (typeof payload.end_time !== "string") {
+    return null;
+  }
+
+  if (typeof payload.user_group !== "string") {
+    return null;
+  }
+
+  if (typeof payload.promo_type !== "string") {
+    return null;
+  }
+
+  if (!isNonArrayObject(payload.budget)) {
+    return null;
+  }
+
+  return payload as UberCreatePromotionPayload;
 }
 
-function normalizeListPromotionsQuery(req: Request): UberPromotionListQuery {
-  const query: UberPromotionListQuery = {};
+function normalizeListPromotionsQuery(req: Request): UberListPromotionsQuery {
+  const query: UberListPromotionsQuery = {};
 
-  if (typeof req.query.status === "string") {
-    query.status = req.query.status;
+  if (typeof req.query.state === "string") {
+    query.state = req.query.state;
   }
 
-  if (typeof req.query.page_token === "string") {
-    query.page_token = req.query.page_token;
-  }
-
-  if (typeof req.query.page_size === "string") {
-    const pageSize = Number(req.query.page_size);
-
-    if (Number.isFinite(pageSize) && pageSize > 0) {
-      query.page_size = pageSize;
-    }
+  if (typeof req.query.time_range === "string") {
+    query.time_range = req.query.time_range;
   }
 
   return query;
@@ -147,7 +161,8 @@ export async function createStorePromotion(
     if (!payload) {
       return void res.status(400).json({
         ok: false,
-        message: "El body de la promoción debe ser un objeto JSON válido"
+        message:
+          "El body de la promoción es inválido. Debe incluir start_time, end_time, user_group, budget y promo_type"
       });
     }
 
@@ -190,6 +205,7 @@ export async function listStorePromotions(
     }
 
     const query = normalizeListPromotionsQuery(req);
+
     const result = await getUberPromotionsService().listStorePromotions(
       storeId,
       query
@@ -217,20 +233,18 @@ export async function listStorePromotions(
   }
 }
 
-export async function getStorePromotionDetails(
+export async function getPromotionDetails(
   req: Request,
   res: Response
 ): Promise<void> {
   try {
-    const storeId = requireValidStoreId(req, res);
     const promotionId = requireValidPromotionId(req, res);
 
-    if (!storeId || !promotionId) {
+    if (!promotionId) {
       return;
     }
 
-    const result = await getUberPromotionsService().getStorePromotionDetails(
-      storeId,
+    const result = await getUberPromotionsService().getPromotionDetails(
       promotionId
     );
 
@@ -238,7 +252,6 @@ export async function getStorePromotionDetails(
       ok: true,
       message: "Detalle de promoción obtenido correctamente",
       data: {
-        store_id: storeId,
         promotion_id: promotionId,
         uber_response: result
       }
@@ -249,41 +262,33 @@ export async function getStorePromotionDetails(
       "No fue posible obtener el detalle de la promoción",
       error,
       {
-        storeId: req.params.storeId ?? null,
         promotionId: req.params.promotionId ?? null
       }
     );
   }
 }
 
-export async function revokeStorePromotion(
+export async function revokePromotion(
   req: Request,
   res: Response
 ): Promise<void> {
   try {
-    const storeId = requireValidStoreId(req, res);
     const promotionId = requireValidPromotionId(req, res);
 
-    if (!storeId || !promotionId) {
+    if (!promotionId) {
       return;
     }
 
-    const payload = isNonArrayObject(req.body) ? req.body : {};
-
-    const result = await getUberPromotionsService().revokeStorePromotion(
-      storeId,
-      promotionId,
-      payload
+    const result = await getUberPromotionsService().revokePromotion(
+      promotionId
     );
 
     return void res.status(200).json({
       ok: true,
       message: "Promoción revocada correctamente",
       data: {
-        store_id: storeId,
         promotion_id: promotionId,
-        uber_response: result,
-        submitted_payload: payload
+        uber_response: result
       }
     });
   } catch (error: unknown) {
@@ -292,9 +297,7 @@ export async function revokeStorePromotion(
       "No fue posible revocar la promoción",
       error,
       {
-        storeId: req.params.storeId ?? null,
-        promotionId: req.params.promotionId ?? null,
-        requestBody: req.body ?? null
+        promotionId: req.params.promotionId ?? null
       }
     );
   }

@@ -4,20 +4,43 @@ import { getUberAppTokenService } from "./uberAppToken.service";
 import { UberApiRequestError } from "./uberActivation.service";
 
 export type UberPromotionType =
-  | "FLAT_OFF"
-  | "FREE_ITEM_MIN_BASKET"
-  | "PERCENT_OFF"
+  | "FLATOFF"
+  | "FREEITEM_MINBASKET"
   | "BOGO"
-  | string;
+  | "PERCENTOFF"
+  | "MENU_ITEM_DISCOUNT"
+  | "FREEDELIVERY";
 
-export interface UberPromotionCreatePayload extends Record<string, unknown> {
-  promotion_type?: UberPromotionType;
+export interface UberPromotionMoney {
+  amount: number;
+  currency_code?: string;
 }
 
-export interface UberPromotionListQuery {
-  status?: string;
-  page_size?: number;
-  page_token?: string;
+export interface UberPromotionBudget {
+  unlimited_budget?: boolean;
+  budget_amount?: UberPromotionMoney;
+  periodic_budget?: {
+    budget_amount: UberPromotionMoney;
+    budget_period: "WEEKLY" | string;
+  };
+}
+
+export interface UberCreatePromotionPayload extends Record<string, unknown> {
+  start_time: string;
+  end_time: string;
+  external_promotion_id?: string;
+  user_group: "ALL_CUSTOMERS" | "FIRST_TIME_CUSTOMERS" | string;
+  allow_unlimited_apply?: boolean;
+  currency_code?: string;
+  budget: UberPromotionBudget;
+  promo_type: UberPromotionType;
+  promotion_discount?: Record<string, unknown>;
+  promotion_customization?: Record<string, unknown>;
+}
+
+export interface UberListPromotionsQuery {
+  state?: string;
+  time_range?: string;
 }
 
 export class UberPromotionsService {
@@ -69,6 +92,13 @@ export class UberPromotionsService {
       typeof (responseData as { error?: unknown }).error === "string"
     ) {
       message = (responseData as { error: string }).error;
+    } else if (
+      responseData &&
+      typeof responseData === "object" &&
+      "code" in responseData &&
+      typeof (responseData as { code?: unknown }).code === "string"
+    ) {
+      message = (responseData as { code: string }).code;
     } else if (error.message) {
       message = error.message;
     }
@@ -94,15 +124,15 @@ export class UberPromotionsService {
     return data ?? {};
   }
 
-  private async getPromotionsReadToken(): Promise<string> {
+  private async getPromotionWriteToken(): Promise<string> {
     return getUberAppTokenService().getAccessToken([
-      "eats.store.promotions.read"
+      "eats.store.promotion.write"
     ]);
   }
 
-  private async getPromotionsWriteToken(): Promise<string> {
+  private async getPromotionReadToken(): Promise<string> {
     return getUberAppTokenService().getAccessToken([
-      "eats.store.promotions.write"
+      "eats.store.promotion.read"
     ]);
   }
 
@@ -112,30 +142,35 @@ export class UberPromotionsService {
     };
   }
 
-  private buildStorePromotionsUrl(storeId: string): string {
-    return `${this.apiBaseUrl}/v1/eats/stores/${storeId}/promotions`;
+  private buildCreatePromotionUrl(storeId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/stores/${storeId}/promotion`;
   }
 
-  private buildStorePromotionDetailsUrl(storeId: string, promotionId: string): string {
-    return `${this.apiBaseUrl}/v1/eats/stores/${storeId}/promotions/${promotionId}`;
+  private buildListPromotionsUrl(storeId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/stores/${storeId}/promotions`;
   }
 
-  private buildStorePromotionRevokeUrl(storeId: string, promotionId: string): string {
-    return `${this.apiBaseUrl}/v1/eats/stores/${storeId}/promotions/${promotionId}/revoke`;
+  private buildGetPromotionUrl(promotionId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/promotions/${promotionId}`;
+  }
+
+  private buildRevokePromotionUrl(promotionId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/promotions/${promotionId}/revoke`;
   }
 
   public async createStorePromotion(
     storeId: string,
-    payload: UberPromotionCreatePayload
+    payload: UberCreatePromotionPayload
   ): Promise<unknown> {
-    const token = await this.getPromotionsWriteToken();
-    const requestUrl = this.buildStorePromotionsUrl(storeId);
+    const token = await this.getPromotionWriteToken();
+    const requestUrl = this.buildCreatePromotionUrl(storeId);
 
     try {
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan("DEBUG SERVICE CREATE STORE PROMOTION"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+      console.log(chalk.cyan("scope: eats.store.promotion.write"));
       console.log(chalk.cyan("payload promotion hacia Uber:"));
       console.log(JSON.stringify(payload, null, 2));
 
@@ -171,16 +206,17 @@ export class UberPromotionsService {
 
   public async listStorePromotions(
     storeId: string,
-    query?: UberPromotionListQuery
+    query?: UberListPromotionsQuery
   ): Promise<unknown> {
-    const token = await this.getPromotionsReadToken();
-    const requestUrl = this.buildStorePromotionsUrl(storeId);
+    const token = await this.getPromotionReadToken();
+    const requestUrl = this.buildListPromotionsUrl(storeId);
 
     try {
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan("DEBUG SERVICE LIST STORE PROMOTIONS"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+      console.log(chalk.cyan("scope: eats.store.promotion.read"));
       console.log(chalk.cyan(`query: ${JSON.stringify(query ?? {}, null, 2)}`));
 
       const response = await this.http.get(requestUrl, {
@@ -211,27 +247,23 @@ export class UberPromotionsService {
     }
   }
 
-  public async getStorePromotionDetails(
-    storeId: string,
-    promotionId: string
-  ): Promise<unknown> {
-    const token = await this.getPromotionsReadToken();
-    const requestUrl = this.buildStorePromotionDetailsUrl(storeId, promotionId);
+  public async getPromotionDetails(promotionId: string): Promise<unknown> {
+    const token = await this.getPromotionReadToken();
+    const requestUrl = this.buildGetPromotionUrl(promotionId);
 
     try {
       console.log(chalk.cyan("=============================================="));
-      console.log(chalk.cyan("DEBUG SERVICE GET STORE PROMOTION DETAILS"));
+      console.log(chalk.cyan("DEBUG SERVICE GET PROMOTION DETAILS"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+      console.log(chalk.cyan("scope: eats.store.promotion.read"));
 
       const response = await this.http.get(requestUrl, {
         headers: this.getAuthHeaders(token),
         validateStatus: (status) => status >= 200 && status < 300
       });
 
-      console.log(
-        chalk.green(`✓ Detalle de promoción obtenido correctamente ${promotionId}`)
-      );
+      console.log(chalk.green(`✓ Detalle de promoción obtenido correctamente ${promotionId}`));
 
       return this.normalizeUberResponse(response.status, response.data);
     } catch (error: unknown) {
@@ -253,33 +285,32 @@ export class UberPromotionsService {
     }
   }
 
-  public async revokeStorePromotion(
-    storeId: string,
-    promotionId: string,
-    payload?: Record<string, unknown>
+  public async revokePromotion(
+    promotionId: string
   ): Promise<unknown> {
-    const token = await this.getPromotionsWriteToken();
-    const requestUrl = this.buildStorePromotionRevokeUrl(storeId, promotionId);
+    const token = await this.getPromotionWriteToken();
+    const requestUrl = this.buildRevokePromotionUrl(promotionId);
 
     try {
       console.log(chalk.cyan("=============================================="));
-      console.log(chalk.cyan("DEBUG SERVICE REVOKE STORE PROMOTION"));
+      console.log(chalk.cyan("DEBUG SERVICE REVOKE PROMOTION"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
-      console.log(chalk.cyan("payload revoke promotion hacia Uber:"));
-      console.log(JSON.stringify(payload ?? {}, null, 2));
+      console.log(chalk.cyan("scope: eats.store.promotion.write"));
 
-      const response = await this.http.post(requestUrl, payload ?? {}, {
-        headers: {
-          ...this.getAuthHeaders(token),
-          "Content-Type": "application/json"
-        },
-        validateStatus: (status) => status >= 200 && status < 300
-      });
-
-      console.log(
-        chalk.green(`✓ Promoción revocada correctamente ${promotionId}`)
+      const response = await this.http.post(
+        requestUrl,
+        {},
+        {
+          headers: {
+            ...this.getAuthHeaders(token),
+            "Content-Type": "application/json"
+          },
+          validateStatus: (status) => status >= 200 && status < 300
+        }
       );
+
+      console.log(chalk.green(`✓ Promoción revocada correctamente ${promotionId}`));
 
       return this.normalizeUberResponse(response.status, response.data);
     } catch (error: unknown) {
