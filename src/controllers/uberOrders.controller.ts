@@ -15,7 +15,9 @@ function getSingleString(value: unknown): string | null {
   }
 
   if (Array.isArray(value)) {
-    const first = value.find((item) => typeof item === "string" && item.trim().length > 0);
+    const first = value.find(
+      (item) => typeof item === "string" && item.trim().length > 0
+    );
     return typeof first === "string" ? first.trim() : null;
   }
 
@@ -26,6 +28,10 @@ function looksLikeUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value
   );
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function resolveOrderId(req: Request, res: Response): string | null {
@@ -86,17 +92,20 @@ function sendError(res: Response, defaultMessage: string, error: unknown): void 
   });
 }
 
-function normalizeActions(value: unknown): Array<"get" | "accept" | "deny" | "cancel" | "update"> {
+function normalizeActions(
+  value: unknown
+): Array<"get" | "accept" | "deny" | "cancel" | "update"> {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return value.filter((item) =>
-    item === "get" ||
-    item === "accept" ||
-    item === "deny" ||
-    item === "cancel" ||
-    item === "update"
+  return value.filter(
+    (item) =>
+      item === "get" ||
+      item === "accept" ||
+      item === "deny" ||
+      item === "cancel" ||
+      item === "update"
   ) as Array<"get" | "accept" | "deny" | "cancel" | "update">;
 }
 
@@ -107,13 +116,132 @@ function safeParseJsonObject(value: unknown): Record<string, unknown> | null {
 
   try {
     const parsed = JSON.parse(value);
+
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
+
     return null;
   } catch {
     return null;
   }
+}
+
+function normalizeRequestBody(value: unknown): Record<string, unknown> | null {
+  const parsedFromString = safeParseJsonObject(value);
+
+  if (parsedFromString) {
+    return parsedFromString;
+  }
+
+  if (isPlainObject(value)) {
+    return value;
+  }
+
+  return null;
+}
+
+function getStringField(
+  source: Record<string, unknown> | null | undefined,
+  field: string
+): string | null {
+  if (!source) return null;
+
+  const value = source[field];
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeCancelPayload(
+  rawPayload: Record<string, unknown>
+): {
+  payload: UberCancelOrderPayload | null;
+  error?: {
+    message: string;
+    allowed_reasons?: string[];
+    examples?: Record<string, unknown>;
+  };
+} {
+  const allowedReasons = [
+    "OUT_OF_ITEMS",
+    "KITCHEN_CLOSED",
+    "CUSTOMER_CALLED_TO_CANCEL",
+    "RESTAURANT_TOO_BUSY",
+    "CANNOT_COMPLETE_CUSTOMER_NOTE",
+    "OTHER"
+  ];
+
+  /**
+   * Formato oficial Uber:
+   * {
+   *   "reason": "CUSTOMER_CALLED_TO_CANCEL",
+   *   "details": "..."
+   * }
+   */
+  const officialReason = getStringField(rawPayload, "reason");
+  const officialDetails = getStringField(rawPayload, "details");
+
+  /**
+   * Formato legacy que ya venías usando:
+   * {
+   *   "cancellation_reason": {
+   *     "code": "CUSTOMER_CALLED_TO_CANCEL",
+   *     "description": "..."
+   *   }
+   * }
+   */
+  const cancellationReason = isPlainObject(rawPayload.cancellation_reason)
+    ? rawPayload.cancellation_reason
+    : null;
+
+  const legacyReason = getStringField(cancellationReason, "code");
+  const legacyDetails = getStringField(cancellationReason, "description");
+
+  const reason = officialReason || legacyReason;
+  const details = officialDetails || legacyDetails;
+
+  if (!reason) {
+    return {
+      payload: null,
+      error: {
+        message: "El body es inválido. Debe incluir reason o cancellation_reason.code",
+        examples: {
+          official: {
+            reason: "CUSTOMER_CALLED_TO_CANCEL",
+            details: "Cancel order uAPI validation test from POS integration"
+          },
+          legacy: {
+            cancellation_reason: {
+              code: "CUSTOMER_CALLED_TO_CANCEL",
+              description: "Cancel order uAPI validation test from POS integration"
+            }
+          }
+        }
+      }
+    };
+  }
+
+  if (!allowedReasons.includes(reason)) {
+    return {
+      payload: null,
+      error: {
+        message: "El reason enviado no es válido para Cancel Order",
+        allowed_reasons: allowedReasons
+      }
+    };
+  }
+
+  return {
+    payload: {
+      reason,
+      ...(details ? { details } : {})
+    }
+  };
 }
 
 async function validateOrderAccessForWrite(orderId: string): Promise<{
@@ -219,7 +347,8 @@ async function validateOrderAccessForWrite(orderId: string): Promise<{
       : integration.order_manager_client_id ?? null;
 
   const appClientId =
-    typeof process.env.UBER_CLIENT_ID === "string" && process.env.UBER_CLIENT_ID.trim().length > 0
+    typeof process.env.UBER_CLIENT_ID === "string" &&
+    process.env.UBER_CLIENT_ID.trim().length > 0
       ? process.env.UBER_CLIENT_ID.trim()
       : null;
 
@@ -338,22 +467,13 @@ export async function acceptOrderManually(req: Request, res: Response): Promise<
     console.log(chalk.cyan("req.body crudo:"));
     console.log(req.body);
 
-    const parsedFromString = safeParseJsonObject(req.body);
-
-    if (parsedFromString) {
-      console.log(chalk.yellow("req.body llegó como string JSON; se parseó correctamente."));
-    }
-
     const normalizedBody =
-      parsedFromString ??
-      (req.body && typeof req.body === "object" && !Array.isArray(req.body)
-        ? (req.body as Record<string, unknown>)
-        : {});
+      normalizeRequestBody(req.body) ?? {};
 
     console.log(chalk.cyan("normalizedBody accept:"));
     console.log(normalizedBody);
 
-    const rawPayload = normalizedBody as Record<string, unknown>;
+    const rawPayload = normalizedBody;
 
     const reason =
       typeof rawPayload.reason === "string" && rawPayload.reason.trim().length > 0
@@ -448,17 +568,7 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
     console.log(chalk.cyan("req.body crudo:"));
     console.log(req.body);
 
-    const parsedFromString = safeParseJsonObject(req.body);
-
-    if (parsedFromString) {
-      console.log(chalk.yellow("req.body llegó como string JSON; se parseó correctamente."));
-    }
-
-    const normalizedBody =
-      parsedFromString ??
-      (req.body && typeof req.body === "object" && !Array.isArray(req.body)
-        ? (req.body as Record<string, unknown>)
-        : null);
+    const normalizedBody = normalizeRequestBody(req.body);
 
     console.log(chalk.cyan("normalizedBody deny:"));
     console.log(normalizedBody);
@@ -471,7 +581,7 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
       return;
     }
 
-    const rawPayload = normalizedBody as Record<string, unknown>;
+    const rawPayload = normalizedBody;
 
     const reason =
       rawPayload.reason &&
@@ -581,17 +691,7 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
     console.log(chalk.cyan("req.body crudo:"));
     console.log(req.body);
 
-    const parsedFromString = safeParseJsonObject(req.body);
-
-    if (parsedFromString) {
-      console.log(chalk.yellow("req.body llegó como string JSON; se parseó correctamente."));
-    }
-
-    const normalizedBody =
-      parsedFromString ??
-      (req.body && typeof req.body === "object" && !Array.isArray(req.body)
-        ? (req.body as Record<string, unknown>)
-        : null);
+    const normalizedBody = normalizeRequestBody(req.body);
 
     console.log(chalk.cyan("normalizedBody cancel:"));
     console.log(normalizedBody);
@@ -604,46 +704,42 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
       return;
     }
 
-    const rawPayload = normalizedBody as Record<string, unknown>;
-    const cancellationReason =
-      rawPayload.cancellation_reason &&
-      typeof rawPayload.cancellation_reason === "object" &&
-      !Array.isArray(rawPayload.cancellation_reason)
-        ? (rawPayload.cancellation_reason as Record<string, unknown>)
-        : null;
+    const normalized = normalizeCancelPayload(normalizedBody);
 
-    console.log(chalk.cyan("cancellationReason:"));
-    console.log(cancellationReason);
-
-    const code =
-      cancellationReason && typeof cancellationReason.code === "string"
-        ? cancellationReason.code.trim()
-        : null;
-
-    const description =
-      cancellationReason && typeof cancellationReason.description === "string"
-        ? cancellationReason.description.trim()
-        : undefined;
-
-    if (!code) {
+    if (!normalized.payload) {
       res.status(400).json({
         ok: false,
-        message: "El body es inválido. Debe incluir cancellation_reason.code"
+        message: normalized.error?.message ?? "El body del cancel es inválido",
+        ...(normalized.error?.allowed_reasons
+          ? { allowed_reasons: normalized.error.allowed_reasons }
+          : {}),
+        ...(normalized.error?.examples ? { examples: normalized.error.examples } : {})
       });
       return;
     }
 
-    const payload: UberCancelOrderPayload = {
-      cancellation_reason: {
-        code,
-        ...(description ? { description } : {})
-      }
-    };
+    const payload = normalized.payload;
 
     console.log(chalk.green("payload cancel saneado enviado a Uber:"));
     console.log(JSON.stringify(payload, null, 2));
 
-    await validateOrderAccessForWrite(orderId);
+    const validation = await validateOrderAccessForWrite(orderId);
+
+    console.log(chalk.green("Validación previa de acceso superada:"));
+    console.log(
+      JSON.stringify(
+        {
+          order_id: validation.orderId,
+          store_id: validation.storeId,
+          integration_enabled: validation.integrationEnabled,
+          is_order_manager: validation.isOrderManager,
+          order_manager_client_id: validation.orderManagerClientId,
+          app_client_id: validation.appClientId
+        },
+        null,
+        2
+      )
+    );
 
     const result = await getUberApiService().cancelOrder(orderId, payload);
 
@@ -665,9 +761,9 @@ export async function updateOrderManually(req: Request, res: Response): Promise<
     const orderId = resolveOrderId(req, res);
     if (!orderId) return;
 
-    const payload = req.body as Record<string, unknown> | undefined;
+    const payload = normalizeRequestBody(req.body);
 
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    if (!payload) {
       res.status(400).json({
         ok: false,
         message: "El body del update debe ser un objeto JSON válido"
@@ -697,7 +793,7 @@ export async function runOrderValidationFlow(req: Request, res: Response): Promi
     const orderId = resolveOrderId(req, res);
     if (!orderId) return;
 
-    const body = (req.body ?? {}) as Partial<UberOrderValidationFlowPayload>;
+    const body = (normalizeRequestBody(req.body) ?? {}) as Partial<UberOrderValidationFlowPayload>;
     const actions = normalizeActions(body.actions);
 
     if (actions.length === 0) {
@@ -711,6 +807,7 @@ export async function runOrderValidationFlow(req: Request, res: Response): Promi
 
     const result = await getUberApiService().runValidationFlow(orderId, {
       actions,
+      accept_payload: body.accept_payload,
       deny_payload: body.deny_payload,
       cancel_payload: body.cancel_payload,
       update_payload: body.update_payload
