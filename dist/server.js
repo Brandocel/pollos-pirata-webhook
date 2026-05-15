@@ -9,6 +9,11 @@ const chalk_1 = __importDefault(require("chalk"));
 const cors_1 = __importDefault(require("cors"));
 const webhook_routes_1 = __importDefault(require("./routes/webhook.routes"));
 const uberAuth_routes_1 = __importDefault(require("./routes/uberAuth.routes"));
+const uberIntegration_routes_1 = __importDefault(require("./routes/uberIntegration.routes"));
+const uberStore_routes_1 = __importDefault(require("./routes/uberStore.routes"));
+const uberMenu_routes_1 = __importDefault(require("./routes/uberMenu.routes"));
+const uberOrders_routes_1 = __importDefault(require("./routes/uberOrders.routes"));
+const public_routes_1 = __importDefault(require("./routes/public.routes"));
 const swagger_1 = require("./docs/swagger");
 const app = (0, express_1.default)();
 const port = Number(process.env.PORT || 3000);
@@ -51,29 +56,38 @@ app.get("/health", (_req, res) => {
         url: publicUrl
     });
 });
-/**
- * Webhooks de Uber:
- * se necesita el body crudo para validar firma
- */
+// ====================== RAW BODY SOLO PARA WEBHOOKS ======================
 app.use("/webhooks", express_1.default.raw({
     type: "*/*",
     limit: "2mb"
 }));
-/**
- * Para el resto de rutas sí usamos json/urlencoded
- */
-app.use(express_1.default.json({ limit: "2mb" }));
-app.use(express_1.default.urlencoded({ extended: true, limit: "2mb" }));
+// ====================== LOG DE DIAGNÓSTICO PARA WEBHOOKS ======================
+app.use("/webhooks", (req, _res, next) => {
+    console.log(chalk_1.default.yellow("========================================================"));
+    console.log(chalk_1.default.yellow(" REQUEST ENTRANTE A /webhooks"));
+    console.log(chalk_1.default.yellow(` Método: ${req.method}`));
+    console.log(chalk_1.default.yellow(` URL: ${req.originalUrl}`));
+    console.log(chalk_1.default.yellow(` Content-Type: ${req.header("content-type") ?? "N/A"}`));
+    console.log(chalk_1.default.yellow(` X-Uber-Signature: ${req.header("X-Uber-Signature") ? "Sí" : "No"}`));
+    if (Buffer.isBuffer(req.body)) {
+        console.log(chalk_1.default.yellow(` Raw body length: ${req.body.length}`));
+    }
+    else {
+        console.log(chalk_1.default.yellow(" Raw body length: body no es Buffer"));
+    }
+    console.log(chalk_1.default.yellow("========================================================"));
+    next();
+});
+app.use(express_1.default.json({ limit: "8mb" }));
+app.use(express_1.default.urlencoded({ extended: true, limit: "8mb" }));
 (0, swagger_1.setupSwagger)(app);
+app.use(public_routes_1.default);
 app.use("/webhooks", webhook_routes_1.default);
 app.use("/uber", uberAuth_routes_1.default);
-/**
- * Esta línea estaba duplicando webhookRoutes dentro de /uber
- * y podía causar comportamientos raros.
- * La quitamos:
- *
- * app.use("/uber", webhookRoutes);
- */
+app.use("/uber", uberIntegration_routes_1.default);
+app.use("/uber", uberStore_routes_1.default);
+app.use("/uber", uberMenu_routes_1.default);
+app.use("/uber", uberOrders_routes_1.default);
 app.use((_req, res) => {
     res.status(404).json({
         ok: false,
@@ -91,9 +105,6 @@ app.use((err, _req, res, _next) => {
             });
         }
     }
-    else {
-        console.error(chalk_1.default.red("Error desconocido"));
-    }
     return res.status(500).json({
         ok: false,
         message: "Error interno del servidor"
@@ -107,11 +118,26 @@ app.listen(port, "0.0.0.0", () => {
     console.log(chalk_1.default.white(`URL pública/base: ${publicUrl}`));
     console.log(chalk_1.default.white(`Health: ${publicUrl}/health`));
     console.log(chalk_1.default.white(`Swagger: ${publicUrl}/docs`));
+    console.log(chalk_1.default.white(`Privacy: ${publicUrl}/privacy`));
     console.log(chalk_1.default.white(`OAuth Login: ${publicUrl}/uber/auth/login`));
     console.log(chalk_1.default.white(`OAuth Callback: ${publicUrl}/uber/auth/callback`));
     console.log(chalk_1.default.white(`Session: ${publicUrl}/uber/session`));
     console.log(chalk_1.default.white(`Stores: ${publicUrl}/uber/stores`));
+    console.log(chalk_1.default.white(`Store Integration: ${publicUrl}/uber/stores/{storeId}/integration`));
+    console.log(chalk_1.default.white(`Store Holiday Hours: ${publicUrl}/uber/stores/{storeId}/holiday-hours`));
+    console.log(chalk_1.default.white(`Get Menu: ${publicUrl}/uber/stores/{storeId}/menu`));
+    console.log(chalk_1.default.white(`Upload Menu: ${publicUrl}/uber/stores/{storeId}/menu`));
+    console.log(chalk_1.default.white(`Update Item: ${publicUrl}/uber/stores/{storeId}/menu/items/{itemId}`));
+    console.log(chalk_1.default.white(`Get Order Details: ${publicUrl}/uber/orders/{orderId}`));
     console.log(chalk_1.default.white(`Webhook: ${publicUrl}/webhooks/uber/webhook`));
     console.log(chalk_1.default.white(`Allowed origins: ${allowedOrigins.join(", ") || "Todos"}`));
     console.log(chalk_1.default.green("Servidor iniciado correctamente"));
+    console.log(chalk_1.default.white(`Accept Order: ${publicUrl}/uber/orders/{orderId}/accept`));
+    console.log(chalk_1.default.white(`Deny Order: ${publicUrl}/uber/orders/{orderId}/deny`));
+    console.log(chalk_1.default.white(`Cancel Order: ${publicUrl}/uber/orders/{orderId}/cancel`));
+    console.log(chalk_1.default.white(`Update Order Cart: ${publicUrl}/uber/orders/{orderId}/cart`));
+    console.log(chalk_1.default.white(`Validate Flow: ${publicUrl}/uber/orders/{orderId}/validate-flow`));
+    console.log(chalk_1.default.white(`Webhook Last State: ${publicUrl}/webhooks/uber/webhook/last-state`));
+    console.log(chalk_1.default.white(`Webhook History: ${publicUrl}/webhooks/uber/webhook/history`));
+    console.log(chalk_1.default.white(`Webhook Evidence: ${publicUrl}/webhooks/uber/webhook/evidence`));
 });

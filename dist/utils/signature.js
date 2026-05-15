@@ -1,59 +1,29 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateUberSignature = generateUberSignature;
 exports.verifyUberSignature = verifyUberSignature;
-const crypto = __importStar(require("crypto"));
-function generateUberSignature(rawBody, clientSecret) {
-    return crypto
-        .createHmac("sha256", clientSecret)
-        .update(rawBody)
-        .digest("hex")
-        .toLowerCase();
-}
-function verifyUberSignature(params) {
-    const { rawBody, clientSecret, signatureHeader } = params;
-    if (!signatureHeader || Array.isArray(signatureHeader)) {
+const chalk_1 = __importDefault(require("chalk"));
+const crypto_1 = __importDefault(require("crypto"));
+/**
+ * Verifica la firma HMAC-SHA256 enviada por Uber en el header X-Uber-Signature
+ * La firma es un hexadecimal en minúsculas del raw body usando el client secret.
+ */
+function verifyUberSignature({ rawBody, clientSecret, signatureHeader, }) {
+    if (!signatureHeader || !rawBody || rawBody.length === 0) {
+        console.warn(chalk_1.default.yellow("Firma o body vacío en webhook de Uber"));
         return false;
     }
-    const receivedSignature = signatureHeader.trim().toLowerCase();
-    const expectedSignature = generateUberSignature(rawBody, clientSecret);
-    const receivedBuffer = Buffer.from(receivedSignature, "utf8");
-    const expectedBuffer = Buffer.from(expectedSignature, "utf8");
-    if (receivedBuffer.length !== expectedBuffer.length) {
+    try {
+        const hmac = crypto_1.default.createHmac("sha256", clientSecret);
+        hmac.update(rawBody);
+        const computedSignature = hmac.digest("hex").toLowerCase();
+        // Comparación segura contra ataques de timing
+        return crypto_1.default.timingSafeEqual(Buffer.from(computedSignature, "utf8"), Buffer.from(signatureHeader.toLowerCase(), "utf8"));
+    }
+    catch (error) {
+        console.error(chalk_1.default.red("Error al verificar firma HMAC:"), error);
         return false;
     }
-    return crypto.timingSafeEqual(receivedBuffer, expectedBuffer);
 }
