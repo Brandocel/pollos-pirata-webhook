@@ -88,7 +88,48 @@ function normalizeUpdateStatusPayload(body: unknown): UberStoreStatusPayload | n
     return null;
   }
 
-  return body as UberStoreStatusPayload;
+  const status = body.status;
+
+  if (typeof status !== "string" || status.trim().length === 0) {
+    return null;
+  }
+
+  const normalizedStatus = status.trim().toUpperCase();
+
+  if (normalizedStatus !== "ONLINE" && normalizedStatus !== "OFFLINE") {
+    return null;
+  }
+
+  const normalizedPayload: UberStoreStatusPayload = {
+    status: normalizedStatus
+  };
+
+  if (typeof body.reason === "string" && body.reason.trim().length > 0) {
+    normalizedPayload.reason = body.reason.trim();
+  }
+
+  if (
+    typeof body.is_offline_until === "string" &&
+    body.is_offline_until.trim().length > 0
+  ) {
+    normalizedPayload.is_offline_until = body.is_offline_until.trim();
+  }
+
+  if (
+    typeof body.pause_until === "string" &&
+    body.pause_until.trim().length > 0 &&
+    !normalizedPayload.is_offline_until
+  ) {
+    normalizedPayload.is_offline_until = body.pause_until.trim();
+  }
+
+  if (normalizedStatus === "OFFLINE" && !normalizedPayload.is_offline_until) {
+    normalizedPayload.is_offline_until = new Date(
+      Date.now() + 30 * 60 * 1000
+    ).toISOString();
+  }
+
+  return normalizedPayload;
 }
 
 export async function testStoreStatusWriteScope(
@@ -124,16 +165,17 @@ export async function testStoreStatusReadScope(
 
     return void res.status(200).json({
       ok: true,
-      message: "Scope de store status read autorizado correctamente",
+      message: "Scope de store status read autorizado correctamente usando eats.store",
       data: result
     });
   } catch (error: unknown) {
     return sendDetailedError(
       res,
-      "No fue posible obtener token con scope eats.store.status.read",
+      "No fue posible obtener token para consultar status de store",
       error,
       {
-        scope: "eats.store.status.read"
+        expected_scope_from_docs: "eats.store",
+        note: "La documentación de Retrieve Store Status usa eats.store. No usar eats.store.status.read si Uber lo rechaza como invalid_scope."
       }
     );
   }
@@ -149,8 +191,7 @@ export async function testRestaurantDeliveryStatusScope(
 
     return void res.status(200).json({
       ok: true,
-      message:
-        "Scope de restaurant delivery status autorizado correctamente",
+      message: "Scope de restaurant delivery status autorizado correctamente",
       data: result
     });
   } catch (error: unknown) {
@@ -214,7 +255,8 @@ export async function updateStoreStatus(
     if (!payload) {
       return void res.status(400).json({
         ok: false,
-        message: "El body de actualización de status debe ser un objeto JSON válido"
+        message:
+          "El body de actualización de status es inválido. Debe incluir status ONLINE u OFFLINE. Para OFFLINE puedes enviar is_offline_until o pause_until."
       });
     }
 

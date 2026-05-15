@@ -4,9 +4,9 @@ import { getUberAppTokenService } from "./uberAppToken.service";
 import { UberApiRequestError } from "./uberActivation.service";
 
 export interface UberStoreStatusPayload extends Record<string, unknown> {
-  status?: string;
+  status: "ONLINE" | "OFFLINE" | string;
   reason?: string;
-  pause_until?: string;
+  is_offline_until?: string;
 }
 
 export class UberStoreStatusService {
@@ -96,15 +96,21 @@ export class UberStoreStatusService {
     };
   }
 
+  /**
+   * Según la documentación de Store API:
+   * Retrieve Store Status usa eats.store.
+   */
+  private async getStoreStatusReadToken(): Promise<string> {
+    return getUberAppTokenService().getAccessToken(["eats.store"]);
+  }
+
+  /**
+   * En tu panel de Uber aparece aprobado:
+   * eats.store.status.write
+   */
   private async getStoreStatusWriteToken(): Promise<string> {
     return getUberAppTokenService().getAccessToken([
       "eats.store.status.write"
-    ]);
-  }
-
-  private async getStoreStatusReadToken(): Promise<string> {
-    return getUberAppTokenService().getAccessToken([
-      "eats.store.status.read"
     ]);
   }
 
@@ -114,23 +120,12 @@ export class UberStoreStatusService {
     ]);
   }
 
-  private buildStoreStatusUrl(storeId: string): string {
-    const customPath = process.env.UBER_STORE_STATUS_PATH;
+  private buildGetStoreStatusUrl(storeId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/store/${storeId}/status`;
+  }
 
-    if (customPath && customPath.trim().length > 0) {
-      const normalizedPath = customPath
-        .replace(":storeId", storeId)
-        .replace("{store_id}", storeId)
-        .replace("{storeId}", storeId);
-
-      const finalPath = normalizedPath.startsWith("/")
-        ? normalizedPath
-        : `/${normalizedPath}`;
-
-      return `${this.apiBaseUrl}${finalPath}`;
-    }
-
-    return `${this.apiBaseUrl}/v1/eats/stores/${storeId}/status`;
+  private buildUpdateStoreStatusUrl(storeId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/store/${storeId}/update-store-status`;
   }
 
   public async testStoreStatusWriteScope(): Promise<{
@@ -148,12 +143,15 @@ export class UberStoreStatusService {
   public async testStoreStatusReadScope(): Promise<{
     scope: string;
     token_obtained: boolean;
+    note: string;
   }> {
     await this.getStoreStatusReadToken();
 
     return {
-      scope: "eats.store.status.read",
-      token_obtained: true
+      scope: "eats.store",
+      token_obtained: true,
+      note:
+        "La documentación de Retrieve Store Status usa eats.store. eats.store.status.read no está disponible para esta app."
     };
   }
 
@@ -171,14 +169,14 @@ export class UberStoreStatusService {
 
   public async getStoreStatus(storeId: string): Promise<unknown> {
     const token = await this.getStoreStatusReadToken();
-    const requestUrl = this.buildStoreStatusUrl(storeId);
+    const requestUrl = this.buildGetStoreStatusUrl(storeId);
 
     try {
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan("DEBUG SERVICE GET STORE STATUS"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
-      console.log(chalk.cyan("scope: eats.store.status.read"));
+      console.log(chalk.cyan("scope: eats.store"));
 
       const response = await this.http.get(requestUrl, {
         headers: this.getAuthHeaders(token),
@@ -212,7 +210,7 @@ export class UberStoreStatusService {
     payload: UberStoreStatusPayload
   ): Promise<unknown> {
     const token = await this.getStoreStatusWriteToken();
-    const requestUrl = this.buildStoreStatusUrl(storeId);
+    const requestUrl = this.buildUpdateStoreStatusUrl(storeId);
 
     try {
       console.log(chalk.cyan("=============================================="));
@@ -223,7 +221,7 @@ export class UberStoreStatusService {
       console.log(chalk.cyan("payload status hacia Uber:"));
       console.log(JSON.stringify(payload, null, 2));
 
-      const response = await this.http.put(requestUrl, payload, {
+      const response = await this.http.post(requestUrl, payload, {
         headers: {
           ...this.getAuthHeaders(token),
           "Content-Type": "application/json"
