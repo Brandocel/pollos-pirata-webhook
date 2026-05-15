@@ -4,6 +4,14 @@ import { UberOrderDetails } from "../types/uber";
 import { getUberAppTokenService } from "./uberAppToken.service";
 import { UberApiRequestError } from "./uberActivation.service";
 
+export type UberOrderValidationAction =
+  | "get"
+  | "accept"
+  | "deny"
+  | "cancel"
+  | "update"
+  | "ready";
+
 export interface UberAcceptOrderPayload {
   reason?: string;
   pickup_time?: number;
@@ -41,7 +49,7 @@ export interface UberListStoreOrdersQuery {
 }
 
 export interface UberOrderValidationFlowPayload {
-  actions: Array<"get" | "accept" | "deny" | "cancel" | "update">;
+  actions: UberOrderValidationAction[];
   accept_payload?: UberAcceptOrderPayload;
   deny_payload?: UberDenyOrderPayload;
   cancel_payload?: UberCancelOrderPayload;
@@ -134,47 +142,28 @@ export class UberOrdersService {
     return data ?? {};
   }
 
-  /**
-   * Se mantiene tu endpoint actual para no romper comportamiento existente.
-   */
   private buildDeliveryOrderUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v1/delivery/order/${orderId}`;
   }
 
-  /**
-   * Fallback para obtener detalle de orden en formato Eats.
-   * Esto ayuda al flujo de accept/deny/cancel porque tu controller valida la orden
-   * antes de ejecutar la acción.
-   */
   private buildEatsOrderDetailsUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v2/eats/order/${orderId}`;
   }
 
-  /**
-   * Order: Accept Order (uAPI)
-   */
   private buildAcceptOrderUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/accept_pos_order`;
   }
 
-  /**
-   * Order: Deny Order (uAPI)
-   */
   private buildDenyOrderUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/deny_pos_order`;
   }
 
-  /**
-   * Order: Cancel Order (uAPI)
-   *
-   * Body oficial esperado por Uber:
-   * {
-   *   "reason": "CUSTOMER_CALLED_TO_CANCEL",
-   *   "details": "Cancel order uAPI validation test from POS integration"
-   * }
-   */
   private buildCancelOrderUrl(orderId: string): string {
     return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/cancel`;
+  }
+
+  private buildMarkOrderReadyUrl(orderId: string): string {
+    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/ready`;
   }
 
   private buildOrderCartUrl(orderId: string): string {
@@ -428,6 +417,50 @@ export class UberOrdersService {
     }
   }
 
+  public async markOrderReady(orderId: string): Promise<unknown> {
+    const token = await this.getOrderScopedToken();
+    const requestUrl = this.buildMarkOrderReadyUrl(orderId);
+
+    try {
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan("DEBUG SERVICE MARK ORDER READY"));
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+
+      const response = await this.http.post(
+        requestUrl,
+        {},
+        {
+          headers: {
+            ...this.getAuthHeaders(token),
+            "Content-Type": "application/json"
+          },
+          validateStatus: (status) => status >= 200 && status < 300
+        }
+      );
+
+      console.log(chalk.green(`✓ Pedido marcado como listo correctamente ${orderId}`));
+
+      return this.normalizeUberResponse(response.status, response.data);
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw this.buildAxiosError(
+          error,
+          `No fue posible marcar el pedido como listo ${orderId}`,
+          requestUrl
+        );
+      }
+
+      throw new UberApiRequestError(
+        `No fue posible marcar el pedido como listo ${orderId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
+    }
+  }
+
   public async updateOrderCart(
     orderId: string,
     payload: Record<string, unknown>
@@ -479,14 +512,14 @@ export class UberOrdersService {
   ): Promise<{
     order_id: string;
     steps: Array<{
-      action: "get" | "accept" | "deny" | "cancel" | "update";
+      action: UberOrderValidationAction;
       ok: boolean;
       result?: unknown;
       error?: unknown;
     }>;
   }> {
     const steps: Array<{
-      action: "get" | "accept" | "deny" | "cancel" | "update";
+      action: UberOrderValidationAction;
       ok: boolean;
       result?: unknown;
       error?: unknown;
@@ -526,6 +559,12 @@ export class UberOrdersService {
           }
 
           const result = await this.cancelOrder(orderId, payload.cancel_payload);
+          steps.push({ action, ok: true, result });
+          continue;
+        }
+
+        if (action === "ready") {
+          const result = await this.markOrderReady(orderId);
           steps.push({ action, ok: true, result });
           continue;
         }

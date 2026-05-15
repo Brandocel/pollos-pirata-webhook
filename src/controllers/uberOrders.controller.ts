@@ -4,6 +4,7 @@ import {
   getUberApiService,
   UberCancelOrderPayload,
   UberDenyOrderPayload,
+  UberOrderValidationAction,
   UberOrderValidationFlowPayload
 } from "../services/uberApi";
 import { getUberIntegrationService } from "../services/uberIntegration.service";
@@ -26,7 +27,7 @@ function getSingleString(value: unknown): string | null {
 
 function looksLikeUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value
+    value.trim()
   );
 }
 
@@ -92,9 +93,7 @@ function sendError(res: Response, defaultMessage: string, error: unknown): void 
   });
 }
 
-function normalizeActions(
-  value: unknown
-): Array<"get" | "accept" | "deny" | "cancel" | "update"> {
+function normalizeActions(value: unknown): UberOrderValidationAction[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -105,8 +104,9 @@ function normalizeActions(
       item === "accept" ||
       item === "deny" ||
       item === "cancel" ||
-      item === "update"
-  ) as Array<"get" | "accept" | "deny" | "cancel" | "update">;
+      item === "update" ||
+      item === "ready"
+  ) as UberOrderValidationAction[];
 }
 
 function safeParseJsonObject(value: unknown): Record<string, unknown> | null {
@@ -176,25 +176,9 @@ function normalizeCancelPayload(
     "OTHER"
   ];
 
-  /**
-   * Formato oficial Uber:
-   * {
-   *   "reason": "CUSTOMER_CALLED_TO_CANCEL",
-   *   "details": "..."
-   * }
-   */
   const officialReason = getStringField(rawPayload, "reason");
   const officialDetails = getStringField(rawPayload, "details");
 
-  /**
-   * Formato legacy que ya venías usando:
-   * {
-   *   "cancellation_reason": {
-   *     "code": "CUSTOMER_CALLED_TO_CANCEL",
-   *     "description": "..."
-   *   }
-   * }
-   */
   const cancellationReason = isPlainObject(rawPayload.cancellation_reason)
     ? rawPayload.cancellation_reason
     : null;
@@ -467,8 +451,7 @@ export async function acceptOrderManually(req: Request, res: Response): Promise<
     console.log(chalk.cyan("req.body crudo:"));
     console.log(req.body);
 
-    const normalizedBody =
-      normalizeRequestBody(req.body) ?? {};
+    const normalizedBody = normalizeRequestBody(req.body) ?? {};
 
     console.log(chalk.cyan("normalizedBody accept:"));
     console.log(normalizedBody);
@@ -756,6 +739,52 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
   }
 }
 
+export async function markOrderAsReadyManually(req: Request, res: Response): Promise<void> {
+  try {
+    const orderId = resolveOrderId(req, res);
+    if (!orderId) return;
+
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan("DEBUG MARK ORDER AS READY"));
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan(`orderId: ${orderId}`));
+    console.log(chalk.cyan(`typeof req.body: ${typeof req.body}`));
+    console.log(chalk.cyan("req.body crudo:"));
+    console.log(req.body);
+
+    const validation = await validateOrderAccessForWrite(orderId);
+
+    console.log(chalk.green("Validación previa de acceso superada:"));
+    console.log(
+      JSON.stringify(
+        {
+          order_id: validation.orderId,
+          store_id: validation.storeId,
+          integration_enabled: validation.integrationEnabled,
+          is_order_manager: validation.isOrderManager,
+          order_manager_client_id: validation.orderManagerClientId,
+          app_client_id: validation.appClientId
+        },
+        null,
+        2
+      )
+    );
+
+    const result = await getUberApiService().markOrderReady(orderId);
+
+    res.status(200).json({
+      ok: true,
+      message: "Pedido marcado como listo correctamente",
+      data: {
+        order_id: orderId,
+        uber_response: result
+      }
+    });
+  } catch (error: unknown) {
+    sendError(res, "No fue posible marcar el pedido como listo", error);
+  }
+}
+
 export async function updateOrderManually(req: Request, res: Response): Promise<void> {
   try {
     const orderId = resolveOrderId(req, res);
@@ -800,7 +829,7 @@ export async function runOrderValidationFlow(req: Request, res: Response): Promi
       res.status(400).json({
         ok: false,
         message:
-          "Debes enviar actions con al menos una acción válida: get, accept, deny, cancel, update"
+          "Debes enviar actions con al menos una acción válida: get, accept, deny, cancel, update, ready"
       });
       return;
     }
