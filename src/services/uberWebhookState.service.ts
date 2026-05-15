@@ -19,6 +19,7 @@ export interface WebhookDiagnosticSummary {
   status: WebhookProcessingStatus;
   eventType: string;
   eventId: string | null;
+  eventStatus?: string | null;
   storeId: string | null;
   orderId: string | null;
   resourceHref: string | null;
@@ -28,6 +29,13 @@ export interface WebhookDiagnosticSummary {
   receivedAt: string;
   note?: string | null;
   environment?: string | null;
+
+  /**
+   * Campos útiles para evidencia de cancelación.
+   */
+  cancellationReason?: string | null;
+  failureReason?: string | null;
+  rawMeta?: Record<string, unknown> | null;
 }
 
 const MAX_WEBHOOK_HISTORY = 100;
@@ -45,6 +53,7 @@ export function saveWebhookSummary(
   summary: WebhookDiagnosticSummary
 ): WebhookDiagnosticSummary {
   const snapshot = cloneSummary(summary);
+
   lastWebhookState = snapshot;
   webhookHistory.unshift(snapshot);
 
@@ -60,7 +69,10 @@ export function getLastWebhookState(): WebhookDiagnosticSummary | null {
 }
 
 export function getWebhookHistory(limit = 20): WebhookDiagnosticSummary[] {
-  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(limit, 100)) : 20;
+  const safeLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.min(limit, 100))
+    : 20;
+
   return webhookHistory.slice(0, safeLimit).map(cloneSummary);
 }
 
@@ -69,6 +81,7 @@ export function clearWebhookHistory(): {
   removedCount: number;
 } {
   const removedCount = webhookHistory.length;
+
   webhookHistory.splice(0, webhookHistory.length);
   lastWebhookState = null;
 

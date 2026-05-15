@@ -18,6 +18,8 @@ import {
 } from "../types/uber";
 import { verifyUberSignature } from "../utils/signature";
 
+type WebhookPayloadRecord = UberWebhookEvent & Record<string, unknown>;
+
 function safeJsonParse<T>(rawBody: Buffer): T {
   return JSON.parse(rawBody.toString("utf8")) as T;
 }
@@ -28,16 +30,35 @@ function getSingleString(value: unknown): string | null {
     return normalized.length > 0 ? normalized : null;
   }
 
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
   if (Array.isArray(value)) {
-    const first = value.find((item) => typeof item === "string" && item.trim().length > 0);
-    return typeof first === "string" ? first.trim() : null;
+    const first = value.find((item) => {
+      if (typeof item === "string") return item.trim().length > 0;
+      if (typeof item === "number" || typeof item === "boolean") return true;
+      return false;
+    });
+
+    if (typeof first === "string") {
+      return first.trim();
+    }
+
+    if (typeof first === "number" || typeof first === "boolean") {
+      return String(first);
+    }
   }
 
   return null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 function looksLikeUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(
     value
   );
 }
@@ -47,7 +68,9 @@ function extractOrderIdFromResourceHref(resourceHref?: string | null): string | 
     return null;
   }
 
-  const match = resourceHref.match(/\/order\/([^/?#]+)/i) || resourceHref.match(/\/orders\/([^/?#]+)/i);
+  const match =
+    resourceHref.match(/\/order\/([^/?#]+)/i) ||
+    resourceHref.match(/\/orders\/([^/?#]+)/i);
 
   if (!match?.[1]) {
     return null;
@@ -252,17 +275,171 @@ function verifyWithAnySigningKey(rawBody: Buffer, signatureHeader: string): bool
   return false;
 }
 
+function getPayloadRecord(payload: UberWebhookEvent): WebhookPayloadRecord {
+  return payload as WebhookPayloadRecord;
+}
+
+function getPayloadMeta(payload: UberWebhookEvent): Record<string, unknown> {
+  return isRecord(payload.meta) ? payload.meta : {};
+}
+
 function getEventStoreId(payload: UberWebhookEvent): string | null {
-  return getSingleString(payload.meta?.user_id);
+  const record = getPayloadRecord(payload);
+  const meta = getPayloadMeta(payload);
+
+  return (
+    getSingleString(meta.user_id) ||
+    getSingleString(meta.store_id) ||
+    getSingleString(record.store_id) ||
+    getSingleString(record.storeId) ||
+    null
+  );
 }
 
 function getEventOrderId(payload: UberWebhookEvent): string | null {
-  const resourceId = getSingleString(payload.meta?.resource_id);
+  const record = getPayloadRecord(payload);
+  const meta = getPayloadMeta(payload);
+
+  const resourceId =
+    getSingleString(meta.resource_id) ||
+    getSingleString(meta.order_id) ||
+    getSingleString(meta.orderId) ||
+    getSingleString(record.order_id) ||
+    getSingleString(record.orderId);
+
   if (resourceId) {
     return resourceId;
   }
 
   return extractOrderIdFromResourceHref(getSingleString(payload.resource_href));
+}
+
+function getEventStatus(payload: UberWebhookEvent): string | null {
+  const record = getPayloadRecord(payload);
+  const meta = getPayloadMeta(payload);
+
+  return (
+    getSingleString(meta.status) ||
+    getSingleString(meta.order_status) ||
+    getSingleString(meta.current_state) ||
+    getSingleString(record.status) ||
+    getSingleString(record.order_status) ||
+    getSingleString(record.current_state) ||
+    null
+  );
+}
+
+function normalizeStatus(value: string | null): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function isCancellationStatus(status: string | null): boolean {
+  const normalized = normalizeStatus(status);
+
+  return [
+    "cancel",
+    "canceled",
+    "cancelled",
+    "order_canceled",
+    "order_cancelled",
+    "customer_canceled",
+    "customer_cancelled",
+    "merchant_canceled",
+    "merchant_cancelled",
+    "pos_canceled",
+    "pos_cancelled"
+  ].includes(normalized);
+}
+
+function isFailureStatus(status: string | null): boolean {
+  const normalized = normalizeStatus(status);
+
+  return [
+    "failed",
+    "failure",
+    "order_failed",
+    "order_failure",
+    "unfulfilled",
+    "rejected",
+    "denied"
+  ].includes(normalized);
+}
+
+function stringifyReason(value: unknown): string | null {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (isRecord(value)) {
+    const code =
+      getSingleString(value.code) ||
+      getSingleString(value.reason_code) ||
+      getSingleString(value.type);
+
+    const description =
+      getSingleString(value.description) ||
+      getSingleString(value.explanation) ||
+      getSingleString(value.message) ||
+      getSingleString(value.reason);
+
+    if (code && description) {
+      return `${code}: ${description}`;
+    }
+
+    if (code) {
+      return code;
+    }
+
+    if (description) {
+      return description;
+    }
+
+    return JSON.stringify(value);
+  }
+
+  return null;
+}
+
+function getCancellationOrFailureReason(payload: UberWebhookEvent): string | null {
+  const record = getPayloadRecord(payload);
+  const meta = getPayloadMeta(payload);
+
+  return (
+    stringifyReason(meta.cancellation_reason) ||
+    stringifyReason(meta.cancel_reason) ||
+    stringifyReason(meta.failure_reason) ||
+    stringifyReason(meta.reason) ||
+    stringifyReason(record.cancellation_reason) ||
+    stringifyReason(record.cancel_reason) ||
+    stringifyReason(record.failure_reason) ||
+    stringifyReason(record.reason) ||
+    null
+  );
+}
+
+function createCancelFailureNote(params: {
+  baseNote: string;
+  payload: UberWebhookEvent;
+}): string {
+  const eventStatus = getEventStatus(params.payload);
+  const reason = getCancellationOrFailureReason(params.payload);
+
+  const parts = [params.baseNote];
+
+  if (eventStatus) {
+    parts.push(`status=${eventStatus}`);
+  }
+
+  if (reason) {
+    parts.push(`reason=${reason}`);
+  }
+
+  return parts.join(" | ");
 }
 
 function createSummary(partial?: Partial<WebhookDiagnosticSummary>): WebhookDiagnosticSummary {
@@ -284,6 +461,7 @@ function createSummary(partial?: Partial<WebhookDiagnosticSummary>): WebhookDiag
 
 function persistAndPrintSummary(summary: WebhookDiagnosticSummary): void {
   saveWebhookSummary(summary);
+
   printDivider("RESUMEN WEBHOOK", "cyan");
   printKeyValue("status", summary.status, "cyan");
   printKeyValue("eventType", summary.eventType ?? "N/A", "white");
@@ -297,7 +475,11 @@ function persistAndPrintSummary(summary: WebhookDiagnosticSummary): void {
     summary.signatureValid === null ? "No evaluada" : summary.signatureValid ? "Sí" : "No",
     summary.signatureValid === false ? "red" : "white"
   );
-  printKeyValue("responded200", summary.responded200 ? "Sí" : "No", summary.responded200 ? "green" : "red");
+  printKeyValue(
+    "responded200",
+    summary.responded200 ? "Sí" : "No",
+    summary.responded200 ? "green" : "red"
+  );
   printKeyValue("receivedAt", summary.receivedAt, "white");
   printKeyValue("environment", summary.environment ?? "N/A", "white");
 
@@ -306,17 +488,61 @@ function persistAndPrintSummary(summary: WebhookDiagnosticSummary): void {
   }
 }
 
-async function processOrdersNotification(payload: UberWebhookEvent): Promise<WebhookDiagnosticSummary> {
+async function processOrdersNotification(
+  payload: UberWebhookEvent
+): Promise<WebhookDiagnosticSummary> {
   const orderId = getEventOrderId(payload);
   const storeId = getEventStoreId(payload);
+  const eventStatus = getEventStatus(payload);
 
   printDivider("PROCESANDO orders.notification", "gray");
   printKeyValue("event_id", payload.event_id || "N/A", "gray");
   printKeyValue("event_type", payload.event_type || "N/A", "gray");
+  printKeyValue("event_status", eventStatus || "N/A", "gray");
   printKeyValue("store_id(meta.user_id)", storeId || "N/A", "gray");
   printKeyValue("resource_id(meta.resource_id)", payload.meta?.resource_id || "N/A", "gray");
   printKeyValue("resource_href", payload.resource_href || "N/A", "gray");
   printKeyValue("order_id resuelto", orderId || "N/A", "gray");
+
+  /**
+   * Protección importante:
+   * Si Uber manda una cancelación con event_type=orders.notification
+   * y meta.status=canceled/cancelled/failed, NO intentamos consultar detalle
+   * ni aceptar. Solo guardamos evidencia y dejamos el ACK 200 ya enviado.
+   */
+  if (isCancellationStatus(eventStatus)) {
+    const status: WebhookProcessingStatus = "order_cancelled_webhook_received";
+
+    return createSummary({
+      status,
+      eventType: payload.event_type ?? "N/A",
+      eventId: payload.event_id ?? null,
+      storeId,
+      orderId,
+      resourceHref: getSingleString(payload.resource_href),
+      note: createCancelFailureNote({
+        baseNote: "Cancel Notification Handling: orders.notification recibido con status de cancelación",
+        payload
+      })
+    });
+  }
+
+  if (isFailureStatus(eventStatus)) {
+    const status: WebhookProcessingStatus = "order_failure_webhook_received";
+
+    return createSummary({
+      status,
+      eventType: payload.event_type ?? "N/A",
+      eventId: payload.event_id ?? null,
+      storeId,
+      orderId,
+      resourceHref: getSingleString(payload.resource_href),
+      note: createCancelFailureNote({
+        baseNote: "Cancel Notification Handling: orders.notification recibido con status de falla",
+        payload
+      })
+    });
+  }
 
   if (!orderId || !looksLikeUuid(orderId)) {
     return createSummary({
@@ -368,35 +594,65 @@ async function processOrdersNotification(payload: UberWebhookEvent): Promise<Web
   });
 }
 
-async function processOrdersFailure(payload: UberWebhookEvent): Promise<WebhookDiagnosticSummary> {
+async function processOrdersFailure(
+  payload: UberWebhookEvent
+): Promise<WebhookDiagnosticSummary> {
+  const status: WebhookProcessingStatus = "order_failure_webhook_received";
+
   printDivider("EVENTO orders.failure", "red");
+  printKeyValue("event_id", payload.event_id || "N/A", "red");
+  printKeyValue("event_type", payload.event_type || "N/A", "red");
+  printKeyValue("event_status", getEventStatus(payload) || "N/A", "red");
+  printKeyValue("store_id", getEventStoreId(payload) || "N/A", "red");
+  printKeyValue("order_id", getEventOrderId(payload) || "N/A", "red");
+  printKeyValue("resource_href", payload.resource_href || "N/A", "red");
+  printKeyValue("reason", getCancellationOrFailureReason(payload) || "N/A", "red");
 
   return createSummary({
-    status: "order_failure_webhook_received",
+    status,
     eventType: payload.event_type ?? "N/A",
     eventId: payload.event_id ?? null,
     storeId: getEventStoreId(payload),
     orderId: getEventOrderId(payload),
     resourceHref: getSingleString(payload.resource_href),
-    note: "Webhook de cancelación/falla recibido (API v1.0.0)"
+    note: createCancelFailureNote({
+      baseNote: "Cancel Notification Handling: webhook orders.failure recibido y confirmado con ACK 200",
+      payload
+    })
   });
 }
 
-async function processOrdersCancel(payload: UberWebhookEvent): Promise<WebhookDiagnosticSummary> {
-  printDivider("EVENTO orders.cancel", "red");
+async function processOrdersCancel(
+  payload: UberWebhookEvent
+): Promise<WebhookDiagnosticSummary> {
+  const status: WebhookProcessingStatus = "order_cancelled_webhook_received";
+
+  printDivider("EVENTO orders.cancel / orders.cancelled", "red");
+  printKeyValue("event_id", payload.event_id || "N/A", "red");
+  printKeyValue("event_type", payload.event_type || "N/A", "red");
+  printKeyValue("event_status", getEventStatus(payload) || "N/A", "red");
+  printKeyValue("store_id", getEventStoreId(payload) || "N/A", "red");
+  printKeyValue("order_id", getEventOrderId(payload) || "N/A", "red");
+  printKeyValue("resource_href", payload.resource_href || "N/A", "red");
+  printKeyValue("reason", getCancellationOrFailureReason(payload) || "N/A", "red");
 
   return createSummary({
-    status: "order_cancelled_webhook_received",
+    status,
     eventType: payload.event_type ?? "N/A",
     eventId: payload.event_id ?? null,
     storeId: getEventStoreId(payload),
     orderId: getEventOrderId(payload),
     resourceHref: getSingleString(payload.resource_href),
-    note: "Webhook de cancelación recibido"
+    note: createCancelFailureNote({
+      baseNote: "Cancel Notification Handling: webhook de cancelación recibido y confirmado con ACK 200",
+      payload
+    })
   });
 }
 
-async function processOrdersRelease(payload: UberWebhookEvent): Promise<WebhookDiagnosticSummary> {
+async function processOrdersRelease(
+  payload: UberWebhookEvent
+): Promise<WebhookDiagnosticSummary> {
   printDivider("EVENTO orders.release", "cyan");
 
   return createSummary({
@@ -410,7 +666,9 @@ async function processOrdersRelease(payload: UberWebhookEvent): Promise<WebhookD
   });
 }
 
-async function processStoreProvisioned(payload: UberWebhookEvent): Promise<WebhookDiagnosticSummary> {
+async function processStoreProvisioned(
+  payload: UberWebhookEvent
+): Promise<WebhookDiagnosticSummary> {
   return createSummary({
     status: "store_provisioned_webhook_received",
     eventType: payload.event_type ?? "N/A",
@@ -422,7 +680,9 @@ async function processStoreProvisioned(payload: UberWebhookEvent): Promise<Webho
   });
 }
 
-async function processStoreDeprovisioned(payload: UberWebhookEvent): Promise<WebhookDiagnosticSummary> {
+async function processStoreDeprovisioned(
+  payload: UberWebhookEvent
+): Promise<WebhookDiagnosticSummary> {
   return createSummary({
     status: "store_deprovisioned_webhook_received",
     eventType: payload.event_type ?? "N/A",
@@ -434,7 +694,38 @@ async function processStoreDeprovisioned(payload: UberWebhookEvent): Promise<Web
   });
 }
 
-async function processOtherWebhookEvent(payload: UberWebhookEvent): Promise<WebhookDiagnosticSummary> {
+async function processOtherWebhookEvent(
+  payload: UberWebhookEvent
+): Promise<WebhookDiagnosticSummary> {
+  const eventType = payload.event_type ?? "N/A";
+  const eventTypeLower = eventType.toLowerCase();
+  const eventStatus = getEventStatus(payload);
+
+  /**
+   * Primero detectamos cancelaciones por nombre de evento,
+   * aunque Uber cambie entre orders.cancel, orders.cancelled,
+   * orders.canceled, order.cancel, etc.
+   */
+  if (eventTypeLower.includes("cancel")) {
+    return processOrdersCancel(payload);
+  }
+
+  if (eventTypeLower.includes("failure") || eventTypeLower.includes("failed")) {
+    return processOrdersFailure(payload);
+  }
+
+  /**
+   * También detectamos cancelaciones/fallas por status,
+   * incluso si el event_type llega como orders.notification.
+   */
+  if (isCancellationStatus(eventStatus)) {
+    return processOrdersCancel(payload);
+  }
+
+  if (isFailureStatus(eventStatus)) {
+    return processOrdersFailure(payload);
+  }
+
   switch (payload.event_type) {
     case "orders.notification":
       return processOrdersNotification(payload);
@@ -443,6 +734,14 @@ async function processOtherWebhookEvent(payload: UberWebhookEvent): Promise<Webh
       return processOrdersFailure(payload);
 
     case "orders.cancel":
+    case "orders.canceled":
+    case "orders.cancelled":
+    case "order.cancel":
+    case "order.canceled":
+    case "order.cancelled":
+    case "orders.cancel.notification":
+    case "orders.canceled.notification":
+    case "orders.cancelled.notification":
       return processOrdersCancel(payload);
 
     case "orders.release":
@@ -506,6 +805,7 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
         note: "Webhook con body vacío"
       })
     );
+
     return;
   }
 
@@ -526,6 +826,7 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
           note: "Firma inválida; se respondió 200 para evitar reintentos infinitos"
         })
       );
+
       return;
     }
 
@@ -554,12 +855,18 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
         note: "Body recibido pero JSON inválido"
       })
     );
+
     return;
   }
 
   console.log(chalk.magenta("Payload completo del webhook:"));
   console.log(JSON.stringify(payload, null, 2));
 
+  /**
+   * Muy importante:
+   * Respondemos 200 inmediatamente para cumplir el ACK de Uber.
+   * Todo el procesamiento pesado se hace después.
+   */
   res.status(200).end();
   console.log(chalk.green("✓ Respuesta 200 enviada a Uber correctamente"));
 
@@ -582,6 +889,7 @@ export async function handleUberWebhook(req: Request, res: Response): Promise<vo
       persistAndPrintSummary(initialSummary);
 
       const finalSummary = await processOtherWebhookEvent(payload);
+
       finalSummary.signaturePresent = initialSummary.signaturePresent;
       finalSummary.signatureValid = initialSummary.signatureValid;
       finalSummary.responded200 = true;

@@ -17,6 +17,7 @@ router.get("/uber/webhook", (_req: Request, res: Response) => {
 });
 
 router.post("/uber/webhook", handleUberWebhook);
+
 router.get("/uber/webhook/last-state", getLastUberWebhookState);
 router.get("/uber/webhook/history", getUberWebhookHistory);
 router.delete("/uber/webhook/history", clearUberWebhookHistoryHandler);

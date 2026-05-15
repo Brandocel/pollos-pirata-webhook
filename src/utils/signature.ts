@@ -8,13 +8,15 @@ interface VerifyUberSignatureParams {
 }
 
 /**
- * Verifica la firma HMAC-SHA256 enviada por Uber en el header X-Uber-Signature
- * La firma es un hexadecimal en minúsculas del raw body usando el client secret.
+ * Verifica la firma HMAC-SHA256 enviada por Uber en el header X-Uber-Signature.
+ *
+ * Uber firma el raw body del webhook. Por eso el endpoint debe recibir express.raw()
+ * antes de express.json().
  */
 export function verifyUberSignature({
   rawBody,
   clientSecret,
-  signatureHeader,
+  signatureHeader
 }: VerifyUberSignatureParams): boolean {
   if (!signatureHeader || !rawBody || rawBody.length === 0) {
     console.warn(chalk.yellow("Firma o body vacío en webhook de Uber"));
@@ -22,14 +24,21 @@ export function verifyUberSignature({
   }
 
   try {
-    const hmac = crypto.createHmac("sha256", clientSecret);
-    hmac.update(rawBody);
-    const computedSignature = hmac.digest("hex").toLowerCase();
+    const computedSignature = crypto
+      .createHmac("sha256", clientSecret)
+      .update(rawBody)
+      .digest("hex")
+      .toLowerCase();
 
-    // Comparación segura contra ataques de timing
+    const receivedSignature = signatureHeader.toLowerCase();
+
+    if (computedSignature.length !== receivedSignature.length) {
+      return false;
+    }
+
     return crypto.timingSafeEqual(
       Buffer.from(computedSignature, "utf8"),
-      Buffer.from(signatureHeader.toLowerCase(), "utf8")
+      Buffer.from(receivedSignature, "utf8")
     );
   } catch (error) {
     console.error(chalk.red("Error al verificar firma HMAC:"), error);
