@@ -1,8 +1,12 @@
 import { Request, Response } from "express";
 import chalk from "chalk";
-import { UberApiRequestError } from "../services/uberActivation.service";
+import {
+  UberApiRequestError,
+  getUberActivationService
+} from "../services/uberActivation.service";
 import { getUberIntegrationService } from "../services/uberIntegration.service";
 import { UberUpdateStoreIntegrationRequest } from "../types/uber";
+import { readMerchantSessionToken } from "../utils/merchantSessionToken";
 
 function sendDetailedError(
   res: Response,
@@ -75,6 +79,102 @@ function requireValidStoreId(req: Request, res: Response): string | null {
   }
 
   return storeId;
+}
+
+function getMerchantSessionTokenFromRequest(req: Request): string | null {
+  const authorizationHeader = req.header("authorization");
+
+  if (authorizationHeader?.startsWith("Bearer ")) {
+    const token = authorizationHeader.replace("Bearer ", "").trim();
+
+    if (token) {
+      return token;
+    }
+  }
+
+  const merchantSessionHeader = req.header("x-merchant-session-token");
+
+  if (merchantSessionHeader?.trim()) {
+    return merchantSessionHeader.trim();
+  }
+
+  const sessionQuery = req.query.sessionToken;
+
+  if (typeof sessionQuery === "string" && sessionQuery.trim()) {
+    return sessionQuery.trim();
+  }
+
+  return null;
+}
+
+/**
+ * GET /uber/stores
+ *
+ * Requisito Uber:
+ * Integration Config: Get stores to User
+ *
+ * Este endpoint usa el merchant session token generado después del OAuth login.
+ * Internamente desencripta la sesión y usa el access_token del usuario/merchant
+ * para llamar a Uber:
+ *
+ * GET /v1/eats/stores
+ *
+ * Importante:
+ * - No usa app token/client_credentials.
+ * - Debe usar token authorization_code del merchant con eats.pos_provisioning.
+ */
+export async function getStoresToUser(req: Request, res: Response): Promise<void> {
+  try {
+    const merchantSessionToken = getMerchantSessionTokenFromRequest(req);
+
+    if (!merchantSessionToken) {
+      return void res.status(401).json({
+        ok: false,
+        message:
+          "Falta el merchant session token. Envía Authorization: Bearer <merchantSessionToken> o x-merchant-session-token."
+      });
+    }
+
+    const merchantSession = readMerchantSessionToken(merchantSessionToken);
+
+    if (!merchantSession?.accessToken) {
+      return void res.status(401).json({
+        ok: false,
+        message:
+          "La sesión merchant es inválida o expiró. Vuelve a iniciar OAuth desde /uber/auth/login."
+      });
+    }
+
+    const stores = await getUberActivationService().getMerchantStores(
+      merchantSession.accessToken
+    );
+
+    return void res.status(200).json({
+      ok: true,
+      message: "Stores autorizadas para el usuario obtenidas correctamente",
+      data: {
+        total: stores.length,
+        stores
+      }
+    });
+  } catch (error: unknown) {
+    return sendDetailedError(
+      res,
+      "No fue posible obtener las stores autorizadas para el usuario",
+      error,
+      {
+        endpoint: "GET /uber/stores",
+        authSource:
+          req.header("authorization") != null
+            ? "Authorization"
+            : req.header("x-merchant-session-token") != null
+              ? "x-merchant-session-token"
+              : req.query.sessionToken != null
+                ? "query.sessionToken"
+                : null
+      }
+    );
+  }
 }
 
 export async function getMerchantStoreIntegrationDetails(
