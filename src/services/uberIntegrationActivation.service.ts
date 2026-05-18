@@ -1,7 +1,7 @@
 import axios, { AxiosError, AxiosInstance } from "axios";
 import chalk from "chalk";
-import { getUberAppTokenService } from "./uberAppToken.service";
 import { UberApiRequestError } from "./uberActivation.service";
+import { readMerchantSessionToken } from "../utils/merchantSessionToken";
 
 export class UberIntegrationActivationService {
   private readonly apiBaseUrl: string;
@@ -18,8 +18,8 @@ export class UberIntegrationActivationService {
       maxContentLength: Infinity,
       headers: {
         Accept: "application/json",
-        "Accept-Encoding": "gzip"
-      }
+        "Accept-Encoding": "gzip",
+      },
     });
   }
 
@@ -77,7 +77,7 @@ export class UberIntegrationActivationService {
       return {
         success: true,
         status: 204,
-        message: "Uber devolvió 204 No Content"
+        message: "Uber devolvió 204 No Content",
       };
     }
 
@@ -86,15 +86,41 @@ export class UberIntegrationActivationService {
 
   private getAuthHeaders(token: string): Record<string, string> {
     return {
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${token}`,
     };
   }
 
-  private async getActivationScopedToken(): Promise<string> {
-    return getUberAppTokenService().getAccessToken([
-      "eats.store",
-      "eats.pos_provisioning"
-    ]);
+  private getMerchantAccessToken(merchantSessionToken: string): string {
+    const session = readMerchantSessionToken(merchantSessionToken);
+
+    if (!session) {
+      throw new UberApiRequestError(
+        "merchant_session_token inválido o expirado. Vuelve a autenticar el merchant con OAuth Authorization Code.",
+        401,
+        {
+          hint: "Abre nuevamente la URL de autorización de Uber y copia el nuevo session_token.",
+        },
+        "server",
+        undefined
+      );
+    }
+
+    const scopeText = session.scope ?? "";
+
+    if (!scopeText.includes("eats.pos_provisioning")) {
+      throw new UberApiRequestError(
+        "El merchant_session_token no contiene el scope eats.pos_provisioning.",
+        403,
+        {
+          current_scope: scopeText,
+          required_scope: "eats.pos_provisioning",
+        },
+        "server",
+        undefined
+      );
+    }
+
+    return session.accessToken;
   }
 
   private buildActivateIntegrationUrl(): string {
@@ -108,33 +134,58 @@ export class UberIntegrationActivationService {
       return `${this.apiBaseUrl}${normalizedPath}`;
     }
 
-    /*
-      IMPORTANTE:
-      Esta ruta queda configurable porque Uber puede variar el path exacto
-      según la documentación de Integration Activation Suite.
-
-      Primero probaremos el scope. Después, si el scope funciona,
-      ajustamos UBER_ACTIVATE_INTEGRATION_PATH con el path exacto de Uber.
-    */
     return `${this.apiBaseUrl}/v1/eats/pos_provisioning/activate`;
   }
 
-  public async testActivationScopes(): Promise<{
-    scopes: string[];
+  public async testMerchantSessionScopes(
+    merchantSessionToken: string
+  ): Promise<{
     token_obtained: boolean;
+    required_scope: string;
+    current_scope: string;
+    expires_at: number;
     note: string;
   }> {
-    await this.getActivationScopedToken();
+    const session = readMerchantSessionToken(merchantSessionToken);
+
+    if (!session) {
+      throw new UberApiRequestError(
+        "merchant_session_token inválido o expirado",
+        401,
+        null,
+        "server",
+        undefined
+      );
+    }
+
+    const currentScope = session.scope ?? "";
+
+    if (!currentScope.includes("eats.pos_provisioning")) {
+      throw new UberApiRequestError(
+        "El merchant_session_token no contiene eats.pos_provisioning",
+        403,
+        {
+          current_scope: currentScope,
+          required_scope: "eats.pos_provisioning",
+        },
+        "server",
+        undefined
+      );
+    }
 
     return {
-      scopes: ["eats.store", "eats.pos_provisioning"],
       token_obtained: true,
-      note: "Token obtenido correctamente para Integration Activation"
+      required_scope: "eats.pos_provisioning",
+      current_scope: currentScope,
+      expires_at: session.expiresAt,
+      note: "Token de merchant válido para Integration Activation",
     };
   }
 
-  public async activateIntegration(): Promise<unknown> {
-    const token = await this.getActivationScopedToken();
+  public async activateIntegration(
+    merchantSessionToken: string
+  ): Promise<unknown> {
+    const accessToken = this.getMerchantAccessToken(merchantSessionToken);
     const requestUrl = this.buildActivateIntegrationUrl();
 
     try {
@@ -142,11 +193,12 @@ export class UberIntegrationActivationService {
       console.log(chalk.cyan("DEBUG SERVICE ACTIVATE INTEGRATION"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
-      console.log(chalk.cyan("scopes: eats.store eats.pos_provisioning"));
+      console.log(chalk.cyan("auth: merchant session token"));
+      console.log(chalk.cyan("required scope: eats.pos_provisioning"));
 
       const response = await this.http.get(requestUrl, {
-        headers: this.getAuthHeaders(token),
-        validateStatus: (status) => status >= 200 && status < 300
+        headers: this.getAuthHeaders(accessToken),
+        validateStatus: (status) => status >= 200 && status < 300,
       });
 
       console.log(chalk.green("✓ Activate Integration ejecutado correctamente"));
@@ -176,7 +228,8 @@ let uberIntegrationActivationServiceInstance: UberIntegrationActivationService |
 
 export function getUberIntegrationActivationService(): UberIntegrationActivationService {
   if (!uberIntegrationActivationServiceInstance) {
-    uberIntegrationActivationServiceInstance = new UberIntegrationActivationService();
+    uberIntegrationActivationServiceInstance =
+      new UberIntegrationActivationService();
   }
 
   return uberIntegrationActivationServiceInstance;

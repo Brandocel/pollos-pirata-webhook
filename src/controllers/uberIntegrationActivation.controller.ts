@@ -61,39 +61,79 @@ function sendDetailedError(
   });
 }
 
-export async function testIntegrationActivationScopes(
-  _req: Request,
+function getMerchantSessionTokenFromRequest(req: Request): string | null {
+  const headerValue = req.headers["x-merchant-session-token"];
+
+  if (typeof headerValue === "string" && headerValue.trim().length > 0) {
+    return headerValue.trim();
+  }
+
+  const queryValue = req.query.merchant_session_token;
+
+  if (typeof queryValue === "string" && queryValue.trim().length > 0) {
+    return queryValue.trim();
+  }
+
+  return null;
+}
+
+export async function testIntegrationActivationMerchantSession(
+  req: Request,
   res: Response
 ): Promise<void> {
   try {
+    const merchantSessionToken = getMerchantSessionTokenFromRequest(req);
+
+    if (!merchantSessionToken) {
+      return void res.status(400).json({
+        ok: false,
+        message:
+          "Falta x-merchant-session-token en headers o merchant_session_token en query params"
+      });
+    }
+
     const result =
-      await getUberIntegrationActivationService().testActivationScopes();
+      await getUberIntegrationActivationService().testMerchantSessionScopes(
+        merchantSessionToken
+      );
 
     return void res.status(200).json({
       ok: true,
-      message: "Scope de integration activation autorizado correctamente",
+      message: "Merchant session token válido para integration activation",
       data: result
     });
   } catch (error: unknown) {
     return sendDetailedError(
       res,
-      "No fue posible obtener token con scopes de integration activation",
+      "No fue posible validar merchant session token para integration activation",
       error,
       {
-        scopes: ["eats.store", "eats.pos_provisioning"],
-        note: "Uber indicó que Activate Integration requiere estos scopes."
+        required_scope: "eats.pos_provisioning",
+        auth_type: "authorization_code"
       }
     );
   }
 }
 
 export async function activateIntegration(
-  _req: Request,
+  req: Request,
   res: Response
 ): Promise<void> {
   try {
+    const merchantSessionToken = getMerchantSessionTokenFromRequest(req);
+
+    if (!merchantSessionToken) {
+      return void res.status(400).json({
+        ok: false,
+        message:
+          "Falta x-merchant-session-token en headers o merchant_session_token en query params"
+      });
+    }
+
     const result =
-      await getUberIntegrationActivationService().activateIntegration();
+      await getUberIntegrationActivationService().activateIntegration(
+        merchantSessionToken
+      );
 
     return void res.status(200).json({
       ok: true,
@@ -108,7 +148,8 @@ export async function activateIntegration(
       "No fue posible ejecutar Activate Integration",
       error,
       {
-        scopes: ["eats.store", "eats.pos_provisioning"]
+        required_scope: "eats.pos_provisioning",
+        auth_type: "authorization_code"
       }
     );
   }
