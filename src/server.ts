@@ -13,6 +13,7 @@ import { setupSwagger } from "./docs/swagger";
 import uberPromotionsRoutes from "./routes/uberPromotions.routes";
 import uberReportsRoutes from "./routes/uberReports.routes";
 import uberStoreStatusRoutes from "./routes/uberStoreStatus.routes";
+import uberIntegrationActivationRoutes from "./routes/uberIntegrationActivation.routes";
 
 const app: Application = express();
 const port = Number(process.env.PORT || 3000);
@@ -109,6 +110,7 @@ app.use("/uber", uberMenuRoutes);
 app.use("/uber", uberOrdersRoutes);
 app.use("/uber", uberReportsRoutes);
 app.use("/uber", uberStoreStatusRoutes);
+app.use("/uber", uberIntegrationActivationRoutes);
 
 app.use("/uber", uberPromotionsRoutes);
 
