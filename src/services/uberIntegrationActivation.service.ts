@@ -3,12 +3,38 @@ import chalk from "chalk";
 import { UberApiRequestError } from "./uberActivation.service";
 import { readMerchantSessionToken } from "../utils/merchantSessionToken";
 
+export interface UberIntegrationActivationPayload {
+  is_order_manager?: boolean;
+  integrator_store_id?: string;
+  integrator_brand_id?: string;
+  merchant_store_id?: string;
+  require_manual_acceptance?: boolean;
+  store_configuration_data?: string;
+  allowed_customer_requests?: {
+    allow_single_use_items_requests?: boolean;
+    allow_special_instruction_requests?: boolean;
+  };
+  webhooks_config?: {
+    schedule_order_webhooks?: {
+      is_enabled: boolean;
+    };
+    order_release_webhooks?: {
+      is_enabled: boolean;
+    };
+    delivery_status_webhooks?: {
+      is_enabled: boolean;
+    };
+    webhooks_version?: string;
+  };
+}
+
 export class UberIntegrationActivationService {
   private readonly apiBaseUrl: string;
   private readonly http: AxiosInstance;
 
   constructor() {
-    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
+    const apiBaseUrl =
+      process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
 
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
 
@@ -34,7 +60,9 @@ export class UberIntegrationActivationService {
     console.error(chalk.red(fallbackMessage));
     console.error(chalk.red(`Status: ${statusCode}`));
     console.error(chalk.red(`URL: ${requestUrl ?? "N/A"}`));
-    console.error(chalk.red(`Respuesta: ${JSON.stringify(responseData, null, 2)}`));
+    console.error(
+      chalk.red(`Respuesta: ${JSON.stringify(responseData, null, 2)}`)
+    );
 
     let message = fallbackMessage;
 
@@ -56,9 +84,11 @@ export class UberIntegrationActivationService {
       responseData &&
       typeof responseData === "object" &&
       "error_description" in responseData &&
-      typeof (responseData as { error_description?: unknown }).error_description === "string"
+      typeof (responseData as { error_description?: unknown })
+        .error_description === "string"
     ) {
-      message = (responseData as { error_description: string }).error_description;
+      message = (responseData as { error_description: string })
+        .error_description;
     } else if (error.message) {
       message = error.message;
     }
@@ -90,7 +120,7 @@ export class UberIntegrationActivationService {
     };
   }
 
-  private getMerchantAccessToken(merchantSessionToken: string): string {
+  private getMerchantSession(merchantSessionToken: string) {
     const session = readMerchantSessionToken(merchantSessionToken);
 
     if (!session) {
@@ -120,21 +150,52 @@ export class UberIntegrationActivationService {
       );
     }
 
-    return session.accessToken;
+    return session;
   }
 
-  private buildActivateIntegrationUrl(): string {
-    const customPath = process.env.UBER_ACTIVATE_INTEGRATION_PATH;
+  private getMerchantAccessToken(merchantSessionToken: string): string {
+    return this.getMerchantSession(merchantSessionToken).accessToken;
+  }
 
-    if (customPath && customPath.trim().length > 0) {
-      const normalizedPath = customPath.startsWith("/")
-        ? customPath
-        : `/${customPath}`;
+  private buildActivateIntegrationUrl(storeId: string): string {
+    return `${this.apiBaseUrl}/v1/eats/stores/${encodeURIComponent(
+      storeId
+    )}/pos_data`;
+  }
 
-      return `${this.apiBaseUrl}${normalizedPath}`;
-    }
-
-    return `${this.apiBaseUrl}/v1/eats/pos_provisioning/activate`;
+  private buildDefaultActivationPayload(): UberIntegrationActivationPayload {
+    return {
+      is_order_manager: true,
+      integrator_store_id:
+        process.env.UBER_INTEGRATOR_STORE_ID || "pollos-pirata-store-002",
+      integrator_brand_id:
+        process.env.UBER_INTEGRATOR_BRAND_ID || "pollos-pirata-brand-002",
+      merchant_store_id:
+        process.env.UBER_MERCHANT_STORE_ID ||
+        "pollos-pirata-merchant-store-001",
+      require_manual_acceptance: false,
+      allowed_customer_requests: {
+        allow_single_use_items_requests: false,
+        allow_special_instruction_requests: true,
+      },
+      webhooks_config: {
+        schedule_order_webhooks: {
+          is_enabled: true,
+        },
+        order_release_webhooks: {
+          is_enabled: false,
+        },
+        delivery_status_webhooks: {
+          is_enabled: false,
+        },
+        webhooks_version: "1.0.0",
+      },
+      store_configuration_data: JSON.stringify({
+        source: "pollos-pirata-webhook",
+        environment: process.env.NODE_ENV || "development",
+        integration: "uber-eats-pos",
+      }),
+    };
   }
 
   public async testMerchantSessionScopes(
@@ -146,32 +207,8 @@ export class UberIntegrationActivationService {
     expires_at: number;
     note: string;
   }> {
-    const session = readMerchantSessionToken(merchantSessionToken);
-
-    if (!session) {
-      throw new UberApiRequestError(
-        "merchant_session_token inválido o expirado",
-        401,
-        null,
-        "server",
-        undefined
-      );
-    }
-
+    const session = this.getMerchantSession(merchantSessionToken);
     const currentScope = session.scope ?? "";
-
-    if (!currentScope.includes("eats.pos_provisioning")) {
-      throw new UberApiRequestError(
-        "El merchant_session_token no contiene eats.pos_provisioning",
-        403,
-        {
-          current_scope: currentScope,
-          required_scope: "eats.pos_provisioning",
-        },
-        "server",
-        undefined
-      );
-    }
 
     return {
       token_obtained: true,
@@ -183,21 +220,34 @@ export class UberIntegrationActivationService {
   }
 
   public async activateIntegration(
-    merchantSessionToken: string
+    merchantSessionToken: string,
+    storeId: string,
+    payload?: UberIntegrationActivationPayload
   ): Promise<unknown> {
     const accessToken = this.getMerchantAccessToken(merchantSessionToken);
-    const requestUrl = this.buildActivateIntegrationUrl();
+    const requestUrl = this.buildActivateIntegrationUrl(storeId);
+
+    const requestBody = {
+      ...this.buildDefaultActivationPayload(),
+      ...(payload ?? {}),
+    };
 
     try {
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan("DEBUG SERVICE ACTIVATE INTEGRATION"));
       console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan(`method: POST`));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
       console.log(chalk.cyan("auth: merchant session token"));
       console.log(chalk.cyan("required scope: eats.pos_provisioning"));
+      console.log(chalk.cyan("payload activate integration hacia Uber:"));
+      console.log(JSON.stringify(requestBody, null, 2));
 
-      const response = await this.http.get(requestUrl, {
-        headers: this.getAuthHeaders(accessToken),
+      const response = await this.http.post(requestUrl, requestBody, {
+        headers: {
+          ...this.getAuthHeaders(accessToken),
+          "Content-Type": "application/json",
+        },
         validateStatus: (status) => status >= 200 && status < 300,
       });
 
@@ -224,7 +274,8 @@ export class UberIntegrationActivationService {
   }
 }
 
-let uberIntegrationActivationServiceInstance: UberIntegrationActivationService | null = null;
+let uberIntegrationActivationServiceInstance: UberIntegrationActivationService | null =
+  null;
 
 export function getUberIntegrationActivationService(): UberIntegrationActivationService {
   if (!uberIntegrationActivationServiceInstance) {

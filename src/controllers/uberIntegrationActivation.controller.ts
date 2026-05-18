@@ -1,7 +1,10 @@
 import { Request, Response } from "express";
 import chalk from "chalk";
 import { UberApiRequestError } from "../services/uberActivation.service";
-import { getUberIntegrationActivationService } from "../services/uberIntegrationActivation.service";
+import {
+  getUberIntegrationActivationService,
+  UberIntegrationActivationPayload,
+} from "../services/uberIntegrationActivation.service";
 
 function sendDetailedError(
   res: Response,
@@ -23,8 +26,8 @@ function sendDetailedError(
         detail: error.message,
         requestUrl: error.requestUrl ?? null,
         response: error.details ?? null,
-        context: context ?? null
-      }
+        context: context ?? null,
+      },
     });
     return;
   }
@@ -41,8 +44,8 @@ function sendDetailedError(
         detail: error.message,
         requestUrl: null,
         response: null,
-        context: context ?? null
-      }
+        context: context ?? null,
+      },
     });
     return;
   }
@@ -56,8 +59,8 @@ function sendDetailedError(
       detail: "Error desconocido",
       requestUrl: null,
       response: null,
-      context: context ?? null
-    }
+      context: context ?? null,
+    },
   });
 }
 
@@ -77,6 +80,22 @@ function getMerchantSessionTokenFromRequest(req: Request): string | null {
   return null;
 }
 
+function getStoreIdFromRequest(req: Request): string | null {
+  const paramValue = req.params.storeId;
+
+  if (typeof paramValue === "string" && paramValue.trim().length > 0) {
+    return paramValue.trim();
+  }
+
+  const queryValue = req.query.store_id;
+
+  if (typeof queryValue === "string" && queryValue.trim().length > 0) {
+    return queryValue.trim();
+  }
+
+  return null;
+}
+
 export async function testIntegrationActivationMerchantSession(
   req: Request,
   res: Response
@@ -88,7 +107,7 @@ export async function testIntegrationActivationMerchantSession(
       return void res.status(400).json({
         ok: false,
         message:
-          "Falta x-merchant-session-token en headers o merchant_session_token en query params"
+          "Falta x-merchant-session-token en headers o merchant_session_token en query params",
       });
     }
 
@@ -100,7 +119,7 @@ export async function testIntegrationActivationMerchantSession(
     return void res.status(200).json({
       ok: true,
       message: "Merchant session token válido para integration activation",
-      data: result
+      data: result,
     });
   } catch (error: unknown) {
     return sendDetailedError(
@@ -109,7 +128,7 @@ export async function testIntegrationActivationMerchantSession(
       error,
       {
         required_scope: "eats.pos_provisioning",
-        auth_type: "authorization_code"
+        auth_type: "authorization_code",
       }
     );
   }
@@ -126,21 +145,40 @@ export async function activateIntegration(
       return void res.status(400).json({
         ok: false,
         message:
-          "Falta x-merchant-session-token en headers o merchant_session_token en query params"
+          "Falta x-merchant-session-token en headers o merchant_session_token en query params",
       });
     }
 
+    const storeId = getStoreIdFromRequest(req);
+
+    if (!storeId) {
+      return void res.status(400).json({
+        ok: false,
+        message:
+          "Falta storeId en path params o store_id en query params. Ejemplo: /uber/integration-activation/stores/:storeId/activate",
+      });
+    }
+
+    const payload =
+      req.body && typeof req.body === "object" && Object.keys(req.body).length > 0
+        ? (req.body as UberIntegrationActivationPayload)
+        : undefined;
+
     const result =
       await getUberIntegrationActivationService().activateIntegration(
-        merchantSessionToken
+        merchantSessionToken,
+        storeId,
+        payload
       );
 
     return void res.status(200).json({
       ok: true,
       message: "Activate Integration ejecutado correctamente",
       data: {
-        uber_response: result
-      }
+        store_id: storeId,
+        submitted_payload: payload ?? null,
+        uber_response: result,
+      },
     });
   } catch (error: unknown) {
     return sendDetailedError(
@@ -149,7 +187,7 @@ export async function activateIntegration(
       error,
       {
         required_scope: "eats.pos_provisioning",
-        auth_type: "authorization_code"
+        auth_type: "authorization_code",
       }
     );
   }

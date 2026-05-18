@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
   activateIntegration,
-  testIntegrationActivationMerchantSession
+  testIntegrationActivationMerchantSession,
 } from "../controllers/uberIntegrationActivation.controller";
 
 const router = Router();
@@ -11,6 +11,9 @@ router.get(
   testIntegrationActivationMerchantSession
 );
 
-router.get("/integration-activation/activate", activateIntegration);
+router.post(
+  "/integration-activation/stores/:storeId/activate",
+  activateIntegration
+);
 
 export default router;
