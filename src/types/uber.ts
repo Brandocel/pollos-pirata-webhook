@@ -247,3 +247,12 @@ export interface UberOrderDetails {
   };
   raw?: unknown;
 }
+
+export type UberOrderValidationAction =
+  | "get"
+  | "accept"
+  | "deny"
+  | "cancel"
+  | "update"
+  | "ready"
+  | "resolve_fulfillment_issue";

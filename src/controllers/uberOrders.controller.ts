@@ -5,7 +5,8 @@ import {
   UberCancelOrderPayload,
   UberDenyOrderPayload,
   UberOrderValidationAction,
-  UberOrderValidationFlowPayload
+  UberOrderValidationFlowPayload,
+  UberResolveFulfillmentIssuePayload
 } from "../services/uberApi";
 import { getUberIntegrationService } from "../services/uberIntegration.service";
 
@@ -105,7 +106,8 @@ function normalizeActions(value: unknown): UberOrderValidationAction[] {
       item === "deny" ||
       item === "cancel" ||
       item === "update" ||
-      item === "ready"
+      item === "ready" ||
+      item === "resolve_fulfillment_issue"
   ) as UberOrderValidationAction[];
 }
 
@@ -224,6 +226,182 @@ function normalizeCancelPayload(
     payload: {
       reason,
       ...(details ? { details } : {})
+    }
+  };
+}
+
+function normalizeFulfillmentIssuePayload(
+  rawPayload: Record<string, unknown>
+): {
+  payload: UberResolveFulfillmentIssuePayload | null;
+  error?: {
+    message: string;
+    examples?: Record<string, unknown>;
+    allowed_issue_types?: string[];
+    allowed_action_types?: string[];
+  };
+} {
+  const allowedIssueTypes = ["OUT_OF_ITEM", "PARTIAL_AVAILABILITY", "FOUND_ITEM"];
+  const allowedActionTypes = ["REMOVE_ITEM", "REPLACE_FOR_ME", "ADJUST_ITEM"];
+
+  if (
+    Array.isArray(rawPayload.fulfillment_issues) &&
+    rawPayload.fulfillment_issues.length > 0
+  ) {
+    return {
+      payload: {
+        fulfillment_issues:
+          rawPayload.fulfillment_issues as UberResolveFulfillmentIssuePayload["fulfillment_issues"]
+      }
+    };
+  }
+
+  const fulfillmentIssueType =
+    getStringField(rawPayload, "fulfillment_issue_type") ||
+    getStringField(rawPayload, "issue_type") ||
+    "OUT_OF_ITEM";
+
+  const fulfillmentActionType =
+    getStringField(rawPayload, "fulfillment_action_type") ||
+    getStringField(rawPayload, "action_type") ||
+    "REMOVE_ITEM";
+
+  const rootItemInstanceId =
+    getStringField(rawPayload, "root_item_instance_id") ||
+    getStringField(rawPayload, "instance_id");
+
+  if (!allowedIssueTypes.includes(fulfillmentIssueType)) {
+    return {
+      payload: null,
+      error: {
+        message: "fulfillment_issue_type no es válido",
+        allowed_issue_types: allowedIssueTypes,
+        examples: {
+          remove_item: {
+            fulfillment_issue_type: "OUT_OF_ITEM",
+            fulfillment_action_type: "REMOVE_ITEM",
+            root_item_instance_id: "INSTANCE_ID_REAL_DEL_ITEM"
+          }
+        }
+      }
+    };
+  }
+
+  if (!rootItemInstanceId) {
+    return {
+      payload: null,
+      error: {
+        message:
+          "Debes enviar root_item_instance_id o fulfillment_issues[].root_item.instance_id. Este valor sale del detalle real de la orden.",
+        examples: {
+          simplified: {
+            fulfillment_issue_type: "OUT_OF_ITEM",
+            fulfillment_action_type: "REMOVE_ITEM",
+            root_item_instance_id: "INSTANCE_ID_REAL_DEL_ITEM"
+          },
+          official: {
+            fulfillment_issues: [
+              {
+                fulfillment_issue_type: "OUT_OF_ITEM",
+                fulfillment_action_type: "REMOVE_ITEM",
+                root_item: {
+                  instance_id: "INSTANCE_ID_REAL_DEL_ITEM"
+                }
+              }
+            ]
+          }
+        }
+      }
+    };
+  }
+
+  const issue: Record<string, unknown> = {
+    fulfillment_issue_type: fulfillmentIssueType,
+    root_item: {
+      instance_id: rootItemInstanceId
+    }
+  };
+
+  if (fulfillmentIssueType === "OUT_OF_ITEM") {
+    if (!allowedActionTypes.includes(fulfillmentActionType)) {
+      return {
+        payload: null,
+        error: {
+          message: "fulfillment_action_type no es válido",
+          allowed_action_types: allowedActionTypes
+        }
+      };
+    }
+
+    issue.fulfillment_action_type = fulfillmentActionType;
+  }
+
+  if (fulfillmentActionType === "REPLACE_FOR_ME") {
+    if (
+      !rawPayload.item_substitute ||
+      typeof rawPayload.item_substitute !== "object" ||
+      Array.isArray(rawPayload.item_substitute)
+    ) {
+      return {
+        payload: null,
+        error: {
+          message:
+            "Para fulfillment_action_type REPLACE_FOR_ME debes enviar item_substitute",
+          examples: {
+            replace_item: {
+              fulfillment_issue_type: "OUT_OF_ITEM",
+              fulfillment_action_type: "REPLACE_FOR_ME",
+              root_item_instance_id: "INSTANCE_ID_REAL_DEL_ITEM",
+              item_substitute: {
+                id: "ITEM_ID_REEMPLAZO_DEL_MENU",
+                quantity: 1
+              }
+            }
+          }
+        }
+      };
+    }
+
+    issue.item_substitute = rawPayload.item_substitute;
+  }
+
+  if (fulfillmentIssueType === "PARTIAL_AVAILABILITY") {
+    if (
+      rawPayload.item_availability_info &&
+      typeof rawPayload.item_availability_info === "object" &&
+      !Array.isArray(rawPayload.item_availability_info)
+    ) {
+      issue.item_availability_info = rawPayload.item_availability_info;
+    } else if (
+      typeof rawPayload.items_available === "number" &&
+      Number.isFinite(rawPayload.items_available)
+    ) {
+      issue.item_availability_info = {
+        items_available: rawPayload.items_available
+      };
+    } else {
+      return {
+        payload: null,
+        error: {
+          message:
+            "Para PARTIAL_AVAILABILITY debes enviar item_availability_info o items_available",
+          examples: {
+            partial_availability: {
+              fulfillment_issue_type: "PARTIAL_AVAILABILITY",
+              root_item_instance_id: "INSTANCE_ID_REAL_DEL_ITEM",
+              items_available: 1
+            }
+          }
+        }
+      };
+    }
+  }
+
+  return {
+    payload: {
+      fulfillment_issues: [
+        issue as UberResolveFulfillmentIssuePayload["fulfillment_issues"][number]
+      ]
     }
   };
 }
@@ -817,6 +995,112 @@ export async function updateOrderManually(req: Request, res: Response): Promise<
   }
 }
 
+export async function resolveOrderFulfillmentIssueManually(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const orderId = resolveOrderId(req, res);
+    if (!orderId) return;
+
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan("DEBUG RESOLVE ORDER FULFILLMENT ISSUE"));
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan(`orderId: ${orderId}`));
+    console.log(chalk.cyan(`typeof req.body: ${typeof req.body}`));
+    console.log(chalk.cyan("req.body crudo:"));
+    console.log(req.body);
+
+    const normalizedBody = normalizeRequestBody(req.body);
+
+    if (!normalizedBody) {
+      res.status(400).json({
+        ok: false,
+        message: "El body debe ser un objeto JSON válido",
+        examples: {
+          simplified: {
+            fulfillment_issue_type: "OUT_OF_ITEM",
+            fulfillment_action_type: "REMOVE_ITEM",
+            root_item_instance_id: "INSTANCE_ID_REAL_DEL_ITEM"
+          },
+          official: {
+            fulfillment_issues: [
+              {
+                fulfillment_issue_type: "OUT_OF_ITEM",
+                fulfillment_action_type: "REMOVE_ITEM",
+                root_item: {
+                  instance_id: "INSTANCE_ID_REAL_DEL_ITEM"
+                }
+              }
+            ]
+          }
+        }
+      });
+      return;
+    }
+
+    const normalized = normalizeFulfillmentIssuePayload(normalizedBody);
+
+    if (!normalized.payload) {
+      res.status(400).json({
+        ok: false,
+        message:
+          normalized.error?.message ??
+          "El body de fulfillment issues es inválido",
+        ...(normalized.error?.allowed_issue_types
+          ? { allowed_issue_types: normalized.error.allowed_issue_types }
+          : {}),
+        ...(normalized.error?.allowed_action_types
+          ? { allowed_action_types: normalized.error.allowed_action_types }
+          : {}),
+        ...(normalized.error?.examples
+          ? { examples: normalized.error.examples }
+          : {})
+      });
+      return;
+    }
+
+    const payload = normalized.payload;
+
+    console.log(chalk.green("payload fulfillment issue saneado enviado a Uber:"));
+    console.log(JSON.stringify(payload, null, 2));
+
+    const validation = await validateOrderAccessForWrite(orderId);
+
+    console.log(chalk.green("Validación previa de acceso superada:"));
+    console.log(
+      JSON.stringify(
+        {
+          order_id: validation.orderId,
+          store_id: validation.storeId,
+          integration_enabled: validation.integrationEnabled,
+          is_order_manager: validation.isOrderManager,
+          order_manager_client_id: validation.orderManagerClientId,
+          app_client_id: validation.appClientId
+        },
+        null,
+        2
+      )
+    );
+
+    const result = await getUberApiService().resolveOrderFulfillmentIssue(
+      orderId,
+      payload
+    );
+
+    res.status(200).json({
+      ok: true,
+      message: "Fulfillment issue enviado correctamente a Uber",
+      data: {
+        order_id: orderId,
+        uber_response: result
+      }
+    });
+  } catch (error: unknown) {
+    sendError(res, "No fue posible resolver el fulfillment issue de la orden", error);
+  }
+}
+
 export async function runOrderValidationFlow(req: Request, res: Response): Promise<void> {
   try {
     const orderId = resolveOrderId(req, res);
@@ -829,7 +1113,7 @@ export async function runOrderValidationFlow(req: Request, res: Response): Promi
       res.status(400).json({
         ok: false,
         message:
-          "Debes enviar actions con al menos una acción válida: get, accept, deny, cancel, update, ready"
+          "Debes enviar actions con al menos una acción válida: get, accept, deny, cancel, update, ready, resolve_fulfillment_issue"
       });
       return;
     }
@@ -839,7 +1123,8 @@ export async function runOrderValidationFlow(req: Request, res: Response): Promi
       accept_payload: body.accept_payload,
       deny_payload: body.deny_payload,
       cancel_payload: body.cancel_payload,
-      update_payload: body.update_payload
+      update_payload: body.update_payload,
+      resolve_fulfillment_issue_payload: body.resolve_fulfillment_issue_payload
     });
 
     res.status(200).json({

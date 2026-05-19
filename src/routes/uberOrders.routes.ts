@@ -6,6 +6,7 @@ import {
   getOrderDetails,
   listStoreOrders,
   markOrderAsReadyManually,
+  resolveOrderFulfillmentIssueManually,
   runOrderValidationFlow,
   updateOrderManually
 } from "../controllers/uberOrders.controller";
@@ -20,7 +21,21 @@ router.post("/orders/:orderId/deny", denyOrderManually);
 router.post("/orders/:orderId/cancel", cancelOrderManually);
 router.post("/orders/:orderId/ready", markOrderAsReadyManually);
 
+/**
+ * Endpoint técnico existente.
+ * Lo dejamos porque ya lo tenías registrado.
+ */
 router.patch("/orders/:orderId/cart", updateOrderManually);
+
+/**
+ * Alias claro para validación de Uber.
+ * Internamente usa el flujo de fulfillment issues / patch cart.
+ */
+router.post(
+  "/orders/:orderId/resolve-fulfillment-issues",
+  resolveOrderFulfillmentIssueManually
+);
+
 router.post("/orders/:orderId/validate-flow", runOrderValidationFlow);
 
 export default router;

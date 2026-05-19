@@ -10,7 +10,8 @@ export type UberOrderValidationAction =
   | "deny"
   | "cancel"
   | "update"
-  | "ready";
+  | "ready"
+  | "resolve_fulfillment_issue";
 
 export interface UberAcceptOrderPayload {
   reason?: string;
@@ -39,6 +40,19 @@ export interface UberCancelOrderPayload {
   details?: string;
 }
 
+export interface UberResolveFulfillmentIssuePayload {
+  fulfillment_issues: Array<{
+    fulfillment_issue_type: string;
+    fulfillment_action_type?: string;
+    root_item: {
+      instance_id: string;
+    };
+    item_substitute?: Record<string, unknown>;
+    item_availability_info?: Record<string, unknown>;
+    item_adjustment?: Record<string, unknown>;
+  }>;
+}
+
 export interface UberListStoreOrdersQuery {
   state?: string;
   status?: string;
@@ -54,6 +68,7 @@ export interface UberOrderValidationFlowPayload {
   deny_payload?: UberDenyOrderPayload;
   cancel_payload?: UberCancelOrderPayload;
   update_payload?: Record<string, unknown>;
+  resolve_fulfillment_issue_payload?: UberResolveFulfillmentIssuePayload;
 }
 
 export class UberOrdersService {
@@ -167,7 +182,7 @@ export class UberOrdersService {
   }
 
   private buildOrderCartUrl(orderId: string): string {
-    return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/cart`;
+    return `${this.apiBaseUrl}/v2/eats/orders/${orderId}/cart`;
   }
 
   private buildStoreOrdersUrl(storeId: string): string {
@@ -186,7 +201,8 @@ export class UberOrdersService {
       console.log(chalk.cyan(`primaryRequestUrl: ${primaryRequestUrl}`));
 
       const response = await this.http.get<UberOrderDetails>(primaryRequestUrl, {
-        headers: this.getAuthHeaders(token)
+        headers: this.getAuthHeaders(token),
+        validateStatus: (status) => status >= 200 && status < 300
       });
 
       console.log(chalk.green(`✓ Detalle de orden obtenido correctamente para ${orderId}`));
@@ -212,7 +228,8 @@ export class UberOrdersService {
         const fallbackResponse = await this.http.get<UberOrderDetails>(
           fallbackRequestUrl,
           {
-            headers: this.getAuthHeaders(token)
+            headers: this.getAuthHeaders(token),
+            validateStatus: (status) => status >= 200 && status < 300
           }
         );
 
@@ -257,7 +274,8 @@ export class UberOrdersService {
 
       const response = await this.http.get(requestUrl, {
         headers: this.getAuthHeaders(token),
-        params: query ?? {}
+        params: query ?? {},
+        validateStatus: (status) => status >= 200 && status < 300
       });
 
       console.log(chalk.green(`✓ Lista de órdenes obtenida correctamente para store ${storeId}`));
@@ -506,6 +524,53 @@ export class UberOrdersService {
     }
   }
 
+  public async resolveOrderFulfillmentIssue(
+    orderId: string,
+    payload: UberResolveFulfillmentIssuePayload
+  ): Promise<unknown> {
+    const token = await this.getOrderScopedToken();
+    const requestUrl = this.buildOrderCartUrl(orderId);
+
+    try {
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan("DEBUG SERVICE RESOLVE ORDER FULFILLMENT ISSUE"));
+      console.log(chalk.cyan("=============================================="));
+      console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+      console.log(chalk.cyan("payload fulfillment issue hacia Uber:"));
+      console.log(JSON.stringify(payload, null, 2));
+
+      const response = await this.http.patch(requestUrl, payload, {
+        headers: {
+          ...this.getAuthHeaders(token),
+          "Content-Type": "application/json"
+        },
+        validateStatus: (status) => status >= 200 && status < 300
+      });
+
+      console.log(
+        chalk.green(`✓ Fulfillment issue enviado correctamente para orden ${orderId}`)
+      );
+
+      return this.normalizeUberResponse(response.status, response.data);
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw this.buildAxiosError(
+          error,
+          `No fue posible resolver el fulfillment issue de la orden ${orderId}`,
+          requestUrl
+        );
+      }
+
+      throw new UberApiRequestError(
+        `No fue posible resolver el fulfillment issue de la orden ${orderId}`,
+        500,
+        null,
+        "server",
+        requestUrl
+      );
+    }
+  }
+
   public async runValidationFlow(
     orderId: string,
     payload: UberOrderValidationFlowPayload
@@ -575,6 +640,26 @@ export class UberOrdersService {
           }
 
           const result = await this.updateOrderCart(orderId, payload.update_payload);
+          steps.push({ action, ok: true, result });
+          continue;
+        }
+
+        if (action === "resolve_fulfillment_issue") {
+          if (
+            !payload.resolve_fulfillment_issue_payload ||
+            !Array.isArray(payload.resolve_fulfillment_issue_payload.fulfillment_issues) ||
+            payload.resolve_fulfillment_issue_payload.fulfillment_issues.length === 0
+          ) {
+            throw new Error(
+              "resolve_fulfillment_issue_payload.fulfillment_issues es requerido para action=resolve_fulfillment_issue"
+            );
+          }
+
+          const result = await this.resolveOrderFulfillmentIssue(
+            orderId,
+            payload.resolve_fulfillment_issue_payload
+          );
+
           steps.push({ action, ok: true, result });
           continue;
         }
