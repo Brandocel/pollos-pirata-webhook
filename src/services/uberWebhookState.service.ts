@@ -12,6 +12,7 @@ export type WebhookProcessingStatus =
   | "order_cancelled_webhook_received"
   | "order_failure_webhook_received"
   | "order_release_webhook_received"
+  | "scheduled_order_notification_webhook_received"
   | "store_provisioned_webhook_received"
   | "store_deprovisioned_webhook_received";
 
@@ -31,7 +32,13 @@ export interface WebhookDiagnosticSummary {
   environment?: string | null;
 
   /**
-   * Campos útiles para evidencia de cancelación.
+   * Campos útiles para evidencia de orden programada.
+   */
+  scheduledOrder?: boolean | null;
+  scheduledPickupTime?: string | null;
+
+  /**
+   * Campos útiles para evidencia de cancelación / falla.
    */
   cancellationReason?: string | null;
   failureReason?: string | null;
