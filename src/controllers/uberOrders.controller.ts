@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import chalk from "chalk";
 import {
   getUberApiService,
+  UberAcceptOrderPayload,
   UberCancelOrderPayload,
   UberDenyOrderPayload,
   UberOrderValidationAction,
@@ -159,52 +160,130 @@ function getStringField(
   return normalized.length > 0 ? normalized : null;
 }
 
-function normalizeCancelPayload(
+function getObjectField(
+  source: Record<string, unknown> | null | undefined,
+  field: string
+): Record<string, unknown> | null {
+  if (!source) return null;
+
+  const value = source[field];
+
+  if (isPlainObject(value)) {
+    return value;
+  }
+
+  return null;
+}
+
+function normalizeReasonType(value: string | null | undefined): string {
+  if (!value) return "ITEM_ISSUE";
+
+  const normalized = value.trim().toUpperCase();
+
+  if (
+    normalized.includes("ITEM") ||
+    normalized.includes("OUT_OF") ||
+    normalized.includes("UNAVAILABLE") ||
+    normalized.includes("SOLD")
+  ) {
+    return "ITEM_ISSUE";
+  }
+
+  if (
+    normalized.includes("KITCHEN") ||
+    normalized.includes("RESTAURANT") ||
+    normalized.includes("BUSY")
+  ) {
+    return "MERCHANT_ISSUE";
+  }
+
+  return normalized;
+}
+
+function normalizeAcceptPayload(
+  rawPayload: Record<string, unknown>
+): UberAcceptOrderPayload {
+  const readyForPickupTime =
+    getStringField(rawPayload, "ready_for_pickup_time") ??
+    getStringField(rawPayload, "readyForPickupTime");
+
+  const externalReferenceId =
+    getStringField(rawPayload, "external_reference_id") ??
+    getStringField(rawPayload, "externalReferenceId");
+
+  const acceptedBy =
+    getStringField(rawPayload, "accepted_by") ??
+    getStringField(rawPayload, "acceptedBy") ??
+    "Pollos Pirata POS";
+
+  const orderPickupInstructions =
+    getStringField(rawPayload, "order_pickup_instructions") ??
+    getStringField(rawPayload, "orderPickupInstructions");
+
+  return {
+    ...(readyForPickupTime ? { ready_for_pickup_time: readyForPickupTime } : {}),
+    ...(externalReferenceId ? { external_reference_id: externalReferenceId } : {}),
+    ...(acceptedBy ? { accepted_by: acceptedBy } : {}),
+    ...(orderPickupInstructions
+      ? { order_pickup_instructions: orderPickupInstructions }
+      : {})
+  };
+}
+
+function normalizeDenyPayload(
   rawPayload: Record<string, unknown>
 ): {
-  payload: UberCancelOrderPayload | null;
+  payload: UberDenyOrderPayload | null;
   error?: {
     message: string;
-    allowed_reasons?: string[];
     examples?: Record<string, unknown>;
   };
 } {
-  const allowedReasons = [
-    "OUT_OF_ITEMS",
-    "KITCHEN_CLOSED",
-    "CUSTOMER_CALLED_TO_CANCEL",
-    "RESTAURANT_TOO_BUSY",
-    "CANNOT_COMPLETE_CUSTOMER_NOTE",
-    "OTHER"
-  ];
+  const denyReason = getObjectField(rawPayload, "deny_reason");
+  const legacyReason = getObjectField(rawPayload, "reason");
 
-  const officialReason = getStringField(rawPayload, "reason");
-  const officialDetails = getStringField(rawPayload, "details");
+  const info =
+    getStringField(denyReason, "info") ??
+    getStringField(denyReason, "description") ??
+    getStringField(legacyReason, "explanation") ??
+    getStringField(legacyReason, "description") ??
+    getStringField(rawPayload, "info") ??
+    getStringField(rawPayload, "description");
 
-  const cancellationReason = isPlainObject(rawPayload.cancellation_reason)
-    ? rawPayload.cancellation_reason
-    : null;
+  const rawType =
+    getStringField(denyReason, "type") ??
+    getStringField(legacyReason, "code") ??
+    getStringField(rawPayload, "type") ??
+    getStringField(rawPayload, "code");
 
-  const legacyReason = getStringField(cancellationReason, "code");
-  const legacyDetails = getStringField(cancellationReason, "description");
+  const clientErrorCode =
+    getStringField(denyReason, "client_error_code") ??
+    getStringField(rawPayload, "client_error_code") ??
+    "408";
 
-  const reason = officialReason || legacyReason;
-  const details = officialDetails || legacyDetails;
+  const itemMetadata =
+    getObjectField(denyReason, "item_metadata") ??
+    getObjectField(rawPayload, "item_metadata") ??
+    undefined;
 
-  if (!reason) {
+  if (!info) {
     return {
       payload: null,
       error: {
-        message: "El body es inválido. Debe incluir reason o cancellation_reason.code",
+        message: "El body es inválido. Debe incluir deny_reason.info",
         examples: {
           official: {
-            reason: "CUSTOMER_CALLED_TO_CANCEL",
-            details: "Cancel order uAPI validation test from POS integration"
+            deny_reason: {
+              info: "Order denied from POS integration validation",
+              type: "ITEM_ISSUE",
+              client_error_code: "408",
+              item_metadata: {}
+            }
           },
-          legacy: {
-            cancellation_reason: {
-              code: "CUSTOMER_CALLED_TO_CANCEL",
-              description: "Cancel order uAPI validation test from POS integration"
+          legacy_supported: {
+            reason: {
+              explanation: "Order denied from POS integration validation",
+              code: "ITEM_ISSUE"
             }
           }
         }
@@ -212,20 +291,87 @@ function normalizeCancelPayload(
     };
   }
 
-  if (!allowedReasons.includes(reason)) {
+  const type = normalizeReasonType(rawType);
+
+  return {
+    payload: {
+      deny_reason: {
+        info,
+        type,
+        ...(clientErrorCode ? { client_error_code: clientErrorCode } : {}),
+        ...(itemMetadata ? { item_metadata: itemMetadata } : {})
+      }
+    }
+  };
+}
+
+function normalizeCancelPayload(
+  rawPayload: Record<string, unknown>
+): {
+  payload: UberCancelOrderPayload | null;
+  error?: {
+    message: string;
+    examples?: Record<string, unknown>;
+  };
+} {
+  const cancellationReason = getObjectField(rawPayload, "cancellation_reason");
+
+  const info =
+    getStringField(cancellationReason, "info") ??
+    getStringField(cancellationReason, "description") ??
+    getStringField(rawPayload, "details") ??
+    getStringField(rawPayload, "description") ??
+    getStringField(rawPayload, "reason");
+
+  const rawType =
+    getStringField(cancellationReason, "type") ??
+    getStringField(cancellationReason, "code") ??
+    getStringField(rawPayload, "type") ??
+    getStringField(rawPayload, "reason");
+
+  const clientErrorCode =
+    getStringField(cancellationReason, "client_error_code") ??
+    getStringField(rawPayload, "client_error_code") ??
+    "408";
+
+  const itemMetadata =
+    getObjectField(cancellationReason, "item_metadata") ??
+    getObjectField(rawPayload, "item_metadata") ??
+    undefined;
+
+  if (!info) {
     return {
       payload: null,
       error: {
-        message: "El reason enviado no es válido para Cancel Order",
-        allowed_reasons: allowedReasons
+        message: "El body es inválido. Debe incluir cancellation_reason.info",
+        examples: {
+          official: {
+            cancellation_reason: {
+              info: "Order cancelled from POS integration validation",
+              type: "ITEM_ISSUE",
+              client_error_code: "408",
+              item_metadata: {}
+            }
+          },
+          legacy_supported: {
+            reason: "CUSTOMER_CALLED_TO_CANCEL",
+            details: "Order cancelled from POS integration validation"
+          }
+        }
       }
     };
   }
 
+  const type = normalizeReasonType(rawType);
+
   return {
     payload: {
-      reason,
-      ...(details ? { details } : {})
+      cancellation_reason: {
+        info,
+        type,
+        ...(clientErrorCode ? { client_error_code: clientErrorCode } : {}),
+        ...(itemMetadata ? { item_metadata: itemMetadata } : {})
+      }
     }
   };
 }
@@ -622,7 +768,7 @@ export async function acceptOrderManually(req: Request, res: Response): Promise<
     if (!orderId) return;
 
     console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan("DEBUG ACCEPT ORDER"));
+    console.log(chalk.cyan("DEBUG ACCEPT ORDER uAPI"));
     console.log(chalk.cyan("=============================================="));
     console.log(chalk.cyan(`orderId: ${orderId}`));
     console.log(chalk.cyan(`typeof req.body: ${typeof req.body}`));
@@ -630,89 +776,42 @@ export async function acceptOrderManually(req: Request, res: Response): Promise<
     console.log(req.body);
 
     const normalizedBody = normalizeRequestBody(req.body) ?? {};
+    const payload = normalizeAcceptPayload(normalizedBody);
 
-    console.log(chalk.cyan("normalizedBody accept:"));
-    console.log(normalizedBody);
-
-    const rawPayload = normalizedBody;
-
-    const reason =
-      typeof rawPayload.reason === "string" && rawPayload.reason.trim().length > 0
-        ? rawPayload.reason.trim()
-        : undefined;
-
-    const pickupTime =
-      typeof rawPayload.pickup_time === "number" && Number.isFinite(rawPayload.pickup_time)
-        ? rawPayload.pickup_time
-        : typeof rawPayload.pickup_time === "string" && rawPayload.pickup_time.trim() !== ""
-          ? Number(rawPayload.pickup_time)
-          : undefined;
-
-    const externalReferenceId =
-      typeof rawPayload.external_reference_id === "string" &&
-      rawPayload.external_reference_id.trim().length > 0
-        ? rawPayload.external_reference_id.trim()
-        : undefined;
-
-    const fieldsRelayed =
-      rawPayload.fields_relayed &&
-      typeof rawPayload.fields_relayed === "object" &&
-      !Array.isArray(rawPayload.fields_relayed)
-        ? (rawPayload.fields_relayed as Record<string, unknown>)
-        : undefined;
-
-    const orderPickupInstructions =
-      typeof rawPayload.order_pickup_instructions === "string" &&
-      rawPayload.order_pickup_instructions.trim().length > 0
-        ? rawPayload.order_pickup_instructions.trim()
-        : undefined;
-
-    const payload = {
-      ...(reason ? { reason } : {}),
-      ...(typeof pickupTime === "number" && Number.isFinite(pickupTime)
-        ? { pickup_time: pickupTime }
-        : {}),
-      ...(externalReferenceId ? { external_reference_id: externalReferenceId } : {}),
-      ...(fieldsRelayed
-        ? {
-            fields_relayed: {
-              ...(typeof fieldsRelayed.order_special_instructions === "boolean"
-                ? { order_special_instructions: fieldsRelayed.order_special_instructions }
-                : {}),
-              ...(typeof fieldsRelayed.item_special_instructions === "boolean"
-                ? { item_special_instructions: fieldsRelayed.item_special_instructions }
-                : {}),
-              ...(typeof fieldsRelayed.item_special_requests === "boolean"
-                ? { item_special_requests: fieldsRelayed.item_special_requests }
-                : {}),
-              ...(typeof fieldsRelayed.promotions === "boolean"
-                ? { promotions: fieldsRelayed.promotions }
-                : {})
-            }
-          }
-        : {}),
-      ...(orderPickupInstructions
-        ? { order_pickup_instructions: orderPickupInstructions }
-        : {})
-    };
-
-    console.log(chalk.green("payload accept saneado enviado a Uber:"));
+    console.log(chalk.green("payload accept uAPI saneado enviado a Uber:"));
     console.log(JSON.stringify(payload, null, 2));
 
-    await validateOrderAccessForWrite(orderId);
+    const validation = await validateOrderAccessForWrite(orderId);
+
+    console.log(chalk.green("Validación previa de acceso superada:"));
+    console.log(
+      JSON.stringify(
+        {
+          order_id: validation.orderId,
+          store_id: validation.storeId,
+          integration_enabled: validation.integrationEnabled,
+          is_order_manager: validation.isOrderManager,
+          order_manager_client_id: validation.orderManagerClientId,
+          app_client_id: validation.appClientId
+        },
+        null,
+        2
+      )
+    );
 
     const result = await getUberApiService().acceptOrder(orderId, payload);
 
     res.status(200).json({
       ok: true,
-      message: "Pedido aceptado correctamente",
+      message: "Pedido aceptado correctamente usando uAPI",
       data: {
         order_id: orderId,
+        uber_endpoint: `/v1/delivery/order/${orderId}/accept`,
         uber_response: result
       }
     });
   } catch (error: unknown) {
-    sendError(res, "No fue posible aceptar el pedido", error);
+    sendError(res, "No fue posible aceptar el pedido usando uAPI", error);
   }
 }
 
@@ -722,7 +821,7 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
     if (!orderId) return;
 
     console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan("DEBUG DENY ORDER"));
+    console.log(chalk.cyan("DEBUG DENY ORDER uAPI"));
     console.log(chalk.cyan("=============================================="));
     console.log(chalk.cyan(`orderId: ${orderId}`));
     console.log(chalk.cyan(`typeof req.body: ${typeof req.body}`));
@@ -730,9 +829,6 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
     console.log(req.body);
 
     const normalizedBody = normalizeRequestBody(req.body);
-
-    console.log(chalk.cyan("normalizedBody deny:"));
-    console.log(normalizedBody);
 
     if (!normalizedBody) {
       res.status(400).json({
@@ -742,68 +838,20 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
       return;
     }
 
-    const rawPayload = normalizedBody;
+    const normalized = normalizeDenyPayload(normalizedBody);
 
-    const reason =
-      rawPayload.reason &&
-      typeof rawPayload.reason === "object" &&
-      !Array.isArray(rawPayload.reason)
-        ? (rawPayload.reason as Record<string, unknown>)
-        : null;
-
-    console.log(chalk.cyan("reason:"));
-    console.log(reason);
-
-    const explanation =
-      reason && typeof reason.explanation === "string"
-        ? reason.explanation.trim()
-        : null;
-
-    const code =
-      reason && typeof reason.code === "string"
-        ? reason.code.trim()
-        : null;
-
-    const outOfStockItems =
-      reason && Array.isArray(reason.out_of_stock_items)
-        ? reason.out_of_stock_items.filter((item): item is string => typeof item === "string")
-        : undefined;
-
-    const invalidItems =
-      reason && Array.isArray(reason.invalid_items)
-        ? reason.invalid_items.filter((item): item is string => typeof item === "string")
-        : undefined;
-
-    if (!explanation) {
+    if (!normalized.payload) {
       res.status(400).json({
         ok: false,
-        message: "El body es inválido. Debe incluir reason.explanation"
+        message: normalized.error?.message ?? "El body del deny es inválido",
+        ...(normalized.error?.examples ? { examples: normalized.error.examples } : {})
       });
       return;
     }
 
-    if (!code) {
-      res.status(400).json({
-        ok: false,
-        message: "El body es inválido. Debe incluir reason.code"
-      });
-      return;
-    }
+    const payload = normalized.payload;
 
-    const payload: UberDenyOrderPayload = {
-      reason: {
-        explanation,
-        code,
-        ...(outOfStockItems && outOfStockItems.length > 0
-          ? { out_of_stock_items: outOfStockItems }
-          : {}),
-        ...(invalidItems && invalidItems.length > 0
-          ? { invalid_items: invalidItems }
-          : {})
-      }
-    };
-
-    console.log(chalk.green("payload deny saneado enviado a Uber:"));
+    console.log(chalk.green("payload deny uAPI saneado enviado a Uber:"));
     console.log(JSON.stringify(payload, null, 2));
 
     const validation = await validateOrderAccessForWrite(orderId);
@@ -828,14 +876,15 @@ export async function denyOrderManually(req: Request, res: Response): Promise<vo
 
     res.status(200).json({
       ok: true,
-      message: "Pedido denegado correctamente",
+      message: "Pedido denegado correctamente usando uAPI",
       data: {
         order_id: orderId,
+        uber_endpoint: `/v1/delivery/order/${orderId}/deny`,
         uber_response: result
       }
     });
   } catch (error: unknown) {
-    sendError(res, "No fue posible denegar el pedido", error);
+    sendError(res, "No fue posible denegar el pedido usando uAPI", error);
   }
 }
 
@@ -845,7 +894,7 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
     if (!orderId) return;
 
     console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan("DEBUG CANCEL ORDER"));
+    console.log(chalk.cyan("DEBUG CANCEL ORDER uAPI"));
     console.log(chalk.cyan("=============================================="));
     console.log(chalk.cyan(`orderId: ${orderId}`));
     console.log(chalk.cyan(`typeof req.body: ${typeof req.body}`));
@@ -853,9 +902,6 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
     console.log(req.body);
 
     const normalizedBody = normalizeRequestBody(req.body);
-
-    console.log(chalk.cyan("normalizedBody cancel:"));
-    console.log(normalizedBody);
 
     if (!normalizedBody) {
       res.status(400).json({
@@ -871,9 +917,6 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
       res.status(400).json({
         ok: false,
         message: normalized.error?.message ?? "El body del cancel es inválido",
-        ...(normalized.error?.allowed_reasons
-          ? { allowed_reasons: normalized.error.allowed_reasons }
-          : {}),
         ...(normalized.error?.examples ? { examples: normalized.error.examples } : {})
       });
       return;
@@ -881,7 +924,7 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
 
     const payload = normalized.payload;
 
-    console.log(chalk.green("payload cancel saneado enviado a Uber:"));
+    console.log(chalk.green("payload cancel uAPI saneado enviado a Uber:"));
     console.log(JSON.stringify(payload, null, 2));
 
     const validation = await validateOrderAccessForWrite(orderId);
@@ -906,14 +949,15 @@ export async function cancelOrderManually(req: Request, res: Response): Promise<
 
     res.status(200).json({
       ok: true,
-      message: "Pedido cancelado correctamente",
+      message: "Pedido cancelado correctamente usando uAPI",
       data: {
         order_id: orderId,
+        uber_endpoint: `/v1/delivery/order/${orderId}/cancel`,
         uber_response: result
       }
     });
   } catch (error: unknown) {
-    sendError(res, "No fue posible cancelar el pedido", error);
+    sendError(res, "No fue posible cancelar el pedido usando uAPI", error);
   }
 }
 

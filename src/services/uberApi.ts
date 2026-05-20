@@ -14,30 +14,28 @@ export type UberOrderValidationAction =
   | "resolve_fulfillment_issue";
 
 export interface UberAcceptOrderPayload {
-  reason?: string;
-  pickup_time?: number;
+  ready_for_pickup_time?: string;
   external_reference_id?: string;
-  fields_relayed?: {
-    order_special_instructions?: boolean;
-    item_special_instructions?: boolean;
-    item_special_requests?: boolean;
-    promotions?: boolean;
-  };
+  accepted_by?: string;
   order_pickup_instructions?: string;
 }
 
 export interface UberDenyOrderPayload {
-  reason: {
-    explanation: string;
-    code: string;
-    out_of_stock_items?: string[];
-    invalid_items?: string[];
+  deny_reason: {
+    info: string;
+    type: string;
+    client_error_code?: string;
+    item_metadata?: Record<string, unknown>;
   };
 }
 
 export interface UberCancelOrderPayload {
-  reason: string;
-  details?: string;
+  cancellation_reason: {
+    info: string;
+    type: string;
+    client_error_code?: string;
+    item_metadata?: Record<string, unknown>;
+  };
 }
 
 export interface UberResolveFulfillmentIssuePayload {
@@ -76,7 +74,7 @@ export class UberOrdersService {
   private readonly http: AxiosInstance;
 
   constructor() {
-    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
+    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://api.uber.com";
 
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
 
@@ -165,16 +163,31 @@ export class UberOrdersService {
     return `${this.apiBaseUrl}/v2/eats/order/${orderId}`;
   }
 
+  /**
+   * uAPI - Accept Order
+   * Official:
+   * POST /v1/delivery/order/{order_id}/accept
+   */
   private buildAcceptOrderUrl(orderId: string): string {
-    return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/accept_pos_order`;
+    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/accept`;
   }
 
+  /**
+   * uAPI - Deny Order
+   * Official:
+   * POST /v1/delivery/order/{order_id}/deny
+   */
   private buildDenyOrderUrl(orderId: string): string {
-    return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/deny_pos_order`;
+    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/deny`;
   }
 
+  /**
+   * uAPI - Cancel Order
+   * Official:
+   * POST /v1/delivery/order/{order_id}/cancel
+   */
   private buildCancelOrderUrl(orderId: string): string {
-    return `${this.apiBaseUrl}/v1/eats/orders/${orderId}/cancel`;
+    return `${this.apiBaseUrl}/v1/delivery/order/${orderId}/cancel`;
   }
 
   private buildMarkOrderReadyUrl(orderId: string): string {
@@ -309,7 +322,7 @@ export class UberOrdersService {
 
     try {
       console.log(chalk.cyan("=============================================="));
-      console.log(chalk.cyan("DEBUG SERVICE ACCEPT ORDER"));
+      console.log(chalk.cyan("DEBUG SERVICE ACCEPT ORDER uAPI"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
       console.log(chalk.cyan("payload accept hacia Uber:"));
@@ -354,7 +367,7 @@ export class UberOrdersService {
 
     try {
       console.log(chalk.cyan("=============================================="));
-      console.log(chalk.cyan("DEBUG SERVICE DENY ORDER"));
+      console.log(chalk.cyan("DEBUG SERVICE DENY ORDER uAPI"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
       console.log(chalk.cyan("payload deny hacia Uber:"));
@@ -399,7 +412,7 @@ export class UberOrdersService {
 
     try {
       console.log(chalk.cyan("=============================================="));
-      console.log(chalk.cyan("DEBUG SERVICE CANCEL ORDER"));
+      console.log(chalk.cyan("DEBUG SERVICE CANCEL ORDER uAPI"));
       console.log(chalk.cyan("=============================================="));
       console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
       console.log(chalk.cyan("payload cancel hacia Uber:"));
@@ -605,12 +618,12 @@ export class UberOrdersService {
         }
 
         if (action === "deny") {
-          if (!payload.deny_payload?.reason?.explanation) {
-            throw new Error("deny_payload.reason.explanation es requerido para action=deny");
+          if (!payload.deny_payload?.deny_reason?.info) {
+            throw new Error("deny_payload.deny_reason.info es requerido para action=deny");
           }
 
-          if (!payload.deny_payload?.reason?.code) {
-            throw new Error("deny_payload.reason.code es requerido para action=deny");
+          if (!payload.deny_payload?.deny_reason?.type) {
+            throw new Error("deny_payload.deny_reason.type es requerido para action=deny");
           }
 
           const result = await this.denyOrder(orderId, payload.deny_payload);
@@ -619,8 +632,16 @@ export class UberOrdersService {
         }
 
         if (action === "cancel") {
-          if (!payload.cancel_payload?.reason) {
-            throw new Error("cancel_payload.reason es requerido para action=cancel");
+          if (!payload.cancel_payload?.cancellation_reason?.info) {
+            throw new Error(
+              "cancel_payload.cancellation_reason.info es requerido para action=cancel"
+            );
+          }
+
+          if (!payload.cancel_payload?.cancellation_reason?.type) {
+            throw new Error(
+              "cancel_payload.cancellation_reason.type es requerido para action=cancel"
+            );
           }
 
           const result = await this.cancelOrder(orderId, payload.cancel_payload);
