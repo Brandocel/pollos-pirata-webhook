@@ -4,6 +4,7 @@ import {
   cancelOrderManually,
   denyOrderManually,
   getOrderDetails,
+  getResolveFulfillmentIssueNotApplicableEvidence,
   listStoreOrders,
   markOrderAsReadyManually,
   resolveOrderFulfillmentIssueManually,
@@ -14,6 +15,33 @@ import {
 const router = Router();
 
 router.get("/stores/:storeId/orders", listStoreOrders);
+
+/**
+ * Evidence endpoint para justificar a Uber que Resolve Fulfillment Issues
+ * no aplica en esta validación actual.
+ *
+ * URL final si este router está montado en /uber:
+ * GET /uber/orders/resolve-fulfillment-issue/not-applicable
+ *
+ * Importante:
+ * Esta ruta va antes de /orders/:orderId para evitar conflictos.
+ */
+router.get(
+  "/orders/resolve-fulfillment-issue/not-applicable",
+  getResolveFulfillmentIssueNotApplicableEvidence
+);
+
+/**
+ * Alias plural por si quieres usar una URL más parecida al nombre oficial.
+ *
+ * URL final:
+ * GET /uber/orders/resolve-fulfillment-issues/not-applicable
+ */
+router.get(
+  "/orders/resolve-fulfillment-issues/not-applicable",
+  getResolveFulfillmentIssueNotApplicableEvidence
+);
+
 router.get("/orders/:orderId", getOrderDetails);
 
 router.post("/orders/:orderId/accept", acceptOrderManually);

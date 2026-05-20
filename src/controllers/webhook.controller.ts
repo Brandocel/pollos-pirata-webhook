@@ -1182,3 +1182,65 @@ export function getUberWebhookEvidenceHandler(_req: Request, res: Response): voi
     }
   });
 }
+export function getResolveFulfillmentIssueNotApplicableEvidence(
+  _req: Request,
+  res: Response
+): void {
+  res.status(200).json({
+    ok: true,
+    message: "Resolve Fulfillment Issues documentado como no aplicable para esta validación",
+    data: {
+      requirement: "Order: Resolve for Fulfillment Issues",
+      status: "not_applicable_with_documented_rationale",
+
+      official_endpoint: {
+        method: "PATCH",
+        path: "/v2/eats/orders/{order_id}/cart",
+        note:
+          "Este endpoint se usa para resolver fulfillment issues cuando la orden y el flujo son elegibles."
+      },
+
+      store_evidence: {
+        store_uuid: "211e6ead-0412-462c-90c3-37e40150ff40",
+        store_name: "Pollo Pirata Test",
+        merchant_type: "MERCHANT_TYPE_RESTAURANT",
+        integration_enabled: true,
+        order_manager_client_id: "Q5X3IfnX8MjNlKoKI8o3ONIKUJQI3Un"
+      },
+
+      test_order_evidence: {
+        order_state: "OFFERED",
+        order_status: "ACTIVE",
+        can_respond_to_fulfillment_issues: false,
+        mark_out_of_item_is_eligible: false,
+        mark_out_of_item_reason: "INELIGIBLE_ORDER"
+      },
+
+      rationale:
+        "Resolve Fulfillment Issues no se validó como endpoint activo porque la orden de prueba no es elegible para acciones de fulfillment issues. El flujo actual del restaurante maneja excepciones operativas mediante los endpoints uAPI Deny Order y Cancel Order con razones estructuradas.",
+
+      implemented_fallbacks: [
+        {
+          name: "Deny Order uAPI",
+          method: "POST",
+          path: "/v1/delivery/order/{order_id}/deny",
+          validation_status: "completed_200_ok"
+        },
+        {
+          name: "Cancel Order uAPI",
+          method: "POST",
+          path: "/v1/delivery/order/{order_id}/cancel",
+          validation_status: "completed_200_ok"
+        },
+        {
+          name: "Cancel Notification Handling webhook",
+          event_type: "orders.failure",
+          validation_status: "completed_ack_200"
+        }
+      ],
+
+      conclusion:
+        "Endpoint recomendado omitido con justificación documentada. Si Uber requiere validación obligatoria de Resolve Fulfillment Issues para producción, se puede habilitar una prueba adicional con una orden elegible y el action_type correspondiente."
+    }
+  });
+}
