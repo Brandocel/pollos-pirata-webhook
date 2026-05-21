@@ -14,7 +14,9 @@ export class UberIntegrationService {
   private readonly http: AxiosInstance;
 
   constructor() {
-    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
+    // FIX: Usar api.uber.com en producción, no test-api.uber.com
+    // test-api.uber.com es solo para sandbox inicial, Uber valida contra api.uber.com
+    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://api.uber.com";
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
 
     this.http = axios.create({
@@ -123,8 +125,8 @@ export class UberIntegrationService {
 
     const body: Record<string, unknown> = {};
 
-    if (typeof (payload as any).integration_enabled === "boolean") {
-      body.integration_enabled = (payload as any).integration_enabled;
+    if (typeof (payload as Record<string, unknown>).integration_enabled === "boolean") {
+      body.integration_enabled = (payload as Record<string, unknown>).integration_enabled;
     }
 
     if (typeof payload.is_order_manager === "boolean") {
@@ -139,8 +141,8 @@ export class UberIntegrationService {
       body.integrator_brand_id = payload.integrator_brand_id.trim();
     }
 
-    if ((payload as any).store_configuration_data != null) {
-      const raw = (payload as any).store_configuration_data;
+    if ((payload as Record<string, unknown>).store_configuration_data != null) {
+      const raw = (payload as Record<string, unknown>).store_configuration_data;
       body.store_configuration_data =
         typeof raw === "string" ? raw : JSON.stringify(raw);
     }

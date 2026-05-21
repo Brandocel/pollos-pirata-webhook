@@ -110,32 +110,41 @@ function getMerchantSessionTokenFromRequest(req: Request): string | null {
 /**
  * GET /uber/stores
  *
- * Requisito Uber:
- * Integration Config: Get stores to User
+ * Requisito Uber — Integration Config: Get stores to User
+ * Documentación: https://developer.uber.com/docs/eats/references/api/store_suite#tag/GetStores/operation/getStores
  *
- * Este endpoint usa el merchant session token generado después del OAuth login.
- * Internamente desencripta la sesión y usa el access_token del usuario/merchant
- * para llamar a Uber:
+ * Flujo:
+ * 1. El merchant inicia OAuth en /uber/auth/login con scope eats.pos_provisioning
+ * 2. Uber redirige al callback con un authorization_code
+ * 3. El callback intercambia el code por un access_token de usuario
+ * 4. Se genera un merchantSessionToken cifrado y se devuelve al cliente
+ * 5. Este endpoint recibe ese merchantSessionToken y lo usa para llamar a Uber
+ *    GET /v1/eats/stores con el token del usuario (no app token)
  *
- * GET /v1/eats/stores
- *
- * Importante:
- * - No usa app token/client_credentials.
- * - Debe usar token authorization_code del merchant con eats.pos_provisioning.
+ * El token de usuario con scope eats.pos_provisioning es el único que puede
+ * listar las stores autorizadas por el merchant para esta integración.
  */
 export async function getStoresToUser(req: Request, res: Response): Promise<void> {
   try {
     const merchantSessionToken = getMerchantSessionTokenFromRequest(req);
 
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan("DEBUG GET STORES TO USER"));
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan(`merchantSessionToken presente: ${merchantSessionToken ? "Sí" : "No"}`));
+
     if (!merchantSessionToken) {
       return void res.status(401).json({
         ok: false,
         message:
-          "Falta el merchant session token. Envía Authorization: Bearer <merchantSessionToken> o x-merchant-session-token."
+          "Falta el merchant session token. Envía Authorization: Bearer <merchantSessionToken> o x-merchant-session-token.",
+        hint: "Primero completa el OAuth en /uber/auth/login con scope eats.pos_provisioning"
       });
     }
 
     const merchantSession = readMerchantSessionToken(merchantSessionToken);
+
+    console.log(chalk.cyan(`merchantSession válida: ${merchantSession?.accessToken ? "Sí" : "No"}`));
 
     if (!merchantSession?.accessToken) {
       return void res.status(401).json({
@@ -149,13 +158,15 @@ export async function getStoresToUser(req: Request, res: Response): Promise<void
       merchantSession.accessToken
     );
 
+    console.log(chalk.green(`✓ Stores obtenidas correctamente: ${stores.length}`));
+
+    // FIX: Uber espera ver la respuesta con las stores en el formato correcto.
+    // Devolvemos 200 con ok:true y el array de stores directamente en data.stores
+    // para que coincida con lo que Uber registra como "successful call".
     return void res.status(200).json({
       ok: true,
-      message: "Stores autorizadas para el usuario obtenidas correctamente",
-      data: {
-        total: stores.length,
-        stores
-      }
+      message: "Tiendas obtenidas correctamente",
+      data: stores
     });
   } catch (error: unknown) {
     return sendDetailedError(

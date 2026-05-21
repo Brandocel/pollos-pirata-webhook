@@ -12,7 +12,8 @@ export class UberStoreService {
   private readonly http: AxiosInstance;
 
   constructor() {
-    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
+    // FIX: Usar api.uber.com en producción, no test-api.uber.com
+    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://api.uber.com";
 
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
     this.http = axios.create({
