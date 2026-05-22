@@ -38,31 +38,7 @@ export class UberActivationService {
   private readonly clientSecret: string;
   private readonly redirectUri: string;
   private readonly apiBaseUrl: string;
-
-  /**
-   * authBaseUrl — usado para el OAuth authorize redirect (paso 2 del flujo).
-   *
-   * Sandbox:    https://sandbox-login.uber.com  (se mantiene para Test App)
-   * Producción: https://login.uber.com
-   *
-   * Variable de entorno: UBER_AUTH_BASE_URL
-   */
   private readonly authBaseUrl: string;
-
-  /**
-   * tokenBaseUrl — usado SOLO para el token exchange (paso 4 del flujo).
-   *
-   * La documentación oficial de Uber especifica:
-   *   POST https://auth.uber.com/oauth/v2/token
-   *
-   * Esto es diferente al authorize URL. Uber registra los token exchanges
-   * en su sistema de validación solo cuando se usan contra auth.uber.com.
-   *
-   * Variable de entorno: UBER_TOKEN_BASE_URL
-   * Fallback: https://auth.uber.com
-   */
-  private readonly tokenBaseUrl: string;
-
   private readonly http: AxiosInstance;
 
   constructor() {
@@ -71,11 +47,6 @@ export class UberActivationService {
     const redirectUri = process.env.UBER_REDIRECT_URI;
     const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
     const authBaseUrl = process.env.UBER_AUTH_BASE_URL || "https://sandbox-login.uber.com";
-
-    // FIX: El token exchange debe ir a auth.uber.com (documentación oficial),
-    // no a sandbox-login.uber.com. Uber registra los Auth Code Flow completions
-    // solo cuando el token exchange llega a auth.uber.com.
-    const tokenBaseUrl = process.env.UBER_TOKEN_BASE_URL || "https://auth.uber.com";
 
     if (!clientId) throw new Error("Falta la variable de entorno UBER_CLIENT_ID");
     if (!clientSecret) throw new Error("Falta la variable de entorno UBER_CLIENT_SECRET");
@@ -86,7 +57,6 @@ export class UberActivationService {
     this.redirectUri = redirectUri;
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
     this.authBaseUrl = authBaseUrl.replace(/\/+$/, "");
-    this.tokenBaseUrl = tokenBaseUrl.replace(/\/+$/, "");
 
     this.http = axios.create({
       timeout: 20000,
@@ -95,13 +65,6 @@ export class UberActivationService {
         "Accept-Encoding": "gzip"
       }
     });
-
-    console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan("UberActivationService inicializado"));
-    console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan(`apiBaseUrl:   ${this.apiBaseUrl}`));
-    console.log(chalk.cyan(`authBaseUrl:  ${this.authBaseUrl}`));
-    console.log(chalk.cyan(`tokenBaseUrl: ${this.tokenBaseUrl}`));
   }
 
   private buildAxiosError(
@@ -237,8 +200,8 @@ export class UberActivationService {
       params.set("merchant_store_id", payload.merchant_store_id.trim());
     }
 
-    if ((payload as Record<string, unknown>).store_configuration_data != null) {
-      const raw = (payload as Record<string, unknown>).store_configuration_data;
+    if ((payload as any).store_configuration_data != null) {
+      const raw = (payload as any).store_configuration_data;
       params.set(
         "store_configuration_data",
         typeof raw === "string" ? raw : JSON.stringify(raw)
@@ -248,15 +211,17 @@ export class UberActivationService {
     return params;
   }
 
-  /**
-   * buildAuthorizationUrl
-   *
-   * Construye la URL de autorización OAuth para redirigir al merchant.
-   * Usa authBaseUrl (sandbox-login.uber.com para Test App).
-   *
-   * Según el diagrama de Uber:
-   * Step 2: POST https://login.uber.com/oauth/v2/authorize
-   */
+  private async fetchRawStoreIntegrationDetails(
+    accessToken: string,
+    storeId: string
+  ): Promise<unknown> {
+    const requestUrl = this.buildStorePosDataUrl(storeId);
+    const response = await this.http.get(requestUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    return response.data;
+  }
+
   public buildAuthorizationUrl(state: string): string {
     const params = new URLSearchParams();
     params.append("client_id", this.clientId);
@@ -265,33 +230,9 @@ export class UberActivationService {
     params.append("scope", "eats.pos_provisioning offline_access");
     params.append("state", state);
 
-    const url = `${this.authBaseUrl}/oauth/v2/authorize?${params.toString()}`;
-
-    console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan("DEBUG BUILD AUTHORIZATION URL"));
-    console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan(`authBaseUrl: ${this.authBaseUrl}`));
-    console.log(chalk.cyan(`url: ${url}`));
-
-    return url;
+    return `${this.authBaseUrl}/oauth/v2/authorize?${params.toString()}`;
   }
 
-  /**
-   * exchangeCodeForToken
-   *
-   * Intercambia el authorization_code por un access_token.
-   *
-   * FIX CRÍTICO: Usa tokenBaseUrl (auth.uber.com) en lugar de authBaseUrl.
-   *
-   * Según el diagrama oficial de Uber:
-   * Step 4: POST https://auth.uber.com/oauth/v2/token
-   *
-   * Uber registra los Auth Code Flow completions en su sistema de validación
-   * SOLO cuando el token exchange llega a auth.uber.com. Si se usa
-   * sandbox-login.uber.com para el token exchange, Uber no lo registra
-   * como "Authorizations Completed" en el Access Tokens dashboard,
-   * lo que impide que pase la validación de producción.
-   */
   public async exchangeCodeForToken(code: string): Promise<UberOAuthTokenResponse> {
     const form = new URLSearchParams();
     form.append("client_id", this.clientId);
@@ -300,14 +241,7 @@ export class UberActivationService {
     form.append("redirect_uri", this.redirectUri);
     form.append("code", code);
 
-    // FIX: tokenBaseUrl = auth.uber.com, NO authBaseUrl = sandbox-login.uber.com
-    const requestUrl = `${this.tokenBaseUrl}/oauth/v2/token`;
-
-    console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan("DEBUG EXCHANGE CODE FOR TOKEN"));
-    console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan(`tokenBaseUrl: ${this.tokenBaseUrl}`));
-    console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+    const requestUrl = `${this.authBaseUrl}/oauth/v2/token`;
 
     try {
       const response = await this.http.post<UberOAuthTokenResponse>(requestUrl, form, {
@@ -315,9 +249,6 @@ export class UberActivationService {
       });
 
       console.log(chalk.green("✓ Token merchant OAuth obtenido correctamente"));
-      console.log(chalk.green(`scope: ${response.data.scope ?? "N/A"}`));
-      console.log(chalk.green(`expires_in: ${response.data.expires_in ?? "N/A"}`));
-
       return response.data;
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
@@ -341,19 +272,12 @@ export class UberActivationService {
   public async getMerchantStores(accessToken: string): Promise<UberStore[]> {
     const requestUrl = `${this.apiBaseUrl}/v1/eats/stores`;
 
-    console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan("DEBUG GET MERCHANT STORES"));
-    console.log(chalk.cyan("=============================================="));
-    console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
-
     try {
       const response = await this.http.get(requestUrl, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
 
       const raw = response.data;
-
-      console.log(chalk.green(`✓ Stores obtenidas correctamente`));
 
       if (Array.isArray(raw)) return raw;
       if (Array.isArray(raw?.stores)) return raw.stores;
@@ -507,8 +431,8 @@ export class UberActivationService {
 
     const body: Record<string, unknown> = {};
 
-    if (typeof (payload as Record<string, unknown>).integration_enabled === "boolean") {
-      body.integration_enabled = (payload as Record<string, unknown>).integration_enabled;
+    if (typeof (payload as any).integration_enabled === "boolean") {
+      body.integration_enabled = (payload as any).integration_enabled;
     }
 
     if (typeof payload.is_order_manager === "boolean") {
@@ -523,8 +447,8 @@ export class UberActivationService {
       body.integrator_brand_id = payload.integrator_brand_id.trim();
     }
 
-    if ((payload as Record<string, unknown>).store_configuration_data != null) {
-      const raw = (payload as Record<string, unknown>).store_configuration_data;
+    if ((payload as any).store_configuration_data != null) {
+      const raw = (payload as any).store_configuration_data;
       body.store_configuration_data =
         typeof raw === "string" ? raw : JSON.stringify(raw);
     }
