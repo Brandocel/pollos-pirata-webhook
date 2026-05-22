@@ -200,8 +200,8 @@ export class UberActivationService {
       params.set("merchant_store_id", payload.merchant_store_id.trim());
     }
 
-    if ((payload as any).store_configuration_data != null) {
-      const raw = (payload as any).store_configuration_data;
+    if ((payload as Record<string, unknown>).store_configuration_data != null) {
+      const raw = (payload as Record<string, unknown>).store_configuration_data;
       params.set(
         "store_configuration_data",
         typeof raw === "string" ? raw : JSON.stringify(raw)
@@ -269,8 +269,28 @@ export class UberActivationService {
     }
   }
 
+  /**
+   * getMerchantStores
+   *
+   * FIX CRÍTICO: Uber requiere el endpoint /v1/delivery/stores de la Store Suite API
+   * para la validación de producción (Integration Config: Get Stores to User).
+   *
+   * Uber confirmó en email de soporte:
+   * "Please complete the required endpoints using the Uber Eats Marketplace Store API."
+   * Endpoint requerido: GET /v1/delivery/stores
+   * Documentación: https://developer.uber.com/docs/eats/references/api/store_suite#tag/GetStores/operation/getStores
+   *
+   * El endpoint anterior /v1/eats/stores corresponde a la versión anterior de la API
+   * y no es registrado como válido en el sistema de validación de producción de Uber.
+   */
   public async getMerchantStores(accessToken: string): Promise<UberStore[]> {
-    const requestUrl = `${this.apiBaseUrl}/v1/eats/stores`;
+    // FIX: /v1/delivery/stores (Store Suite API) en lugar de /v1/eats/stores (API anterior)
+    const requestUrl = `${this.apiBaseUrl}/v1/delivery/stores`;
+
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan("DEBUG GET MERCHANT STORES"));
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
 
     try {
       const response = await this.http.get(requestUrl, {
@@ -278,6 +298,8 @@ export class UberActivationService {
       });
 
       const raw = response.data;
+
+      console.log(chalk.green(`✓ Stores obtenidas correctamente via /v1/delivery/stores`));
 
       if (Array.isArray(raw)) return raw;
       if (Array.isArray(raw?.stores)) return raw.stores;
@@ -431,8 +453,8 @@ export class UberActivationService {
 
     const body: Record<string, unknown> = {};
 
-    if (typeof (payload as any).integration_enabled === "boolean") {
-      body.integration_enabled = (payload as any).integration_enabled;
+    if (typeof (payload as Record<string, unknown>).integration_enabled === "boolean") {
+      body.integration_enabled = (payload as Record<string, unknown>).integration_enabled;
     }
 
     if (typeof payload.is_order_manager === "boolean") {
@@ -447,8 +469,8 @@ export class UberActivationService {
       body.integrator_brand_id = payload.integrator_brand_id.trim();
     }
 
-    if ((payload as any).store_configuration_data != null) {
-      const raw = (payload as any).store_configuration_data;
+    if ((payload as Record<string, unknown>).store_configuration_data != null) {
+      const raw = (payload as Record<string, unknown>).store_configuration_data;
       body.store_configuration_data =
         typeof raw === "string" ? raw : JSON.stringify(raw);
     }
