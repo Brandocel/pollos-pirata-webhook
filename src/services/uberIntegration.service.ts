@@ -14,9 +14,7 @@ export class UberIntegrationService {
   private readonly http: AxiosInstance;
 
   constructor() {
-    // FIX: Usar api.uber.com en producción, no test-api.uber.com
-    // test-api.uber.com es solo para sandbox inicial, Uber valida contra api.uber.com
-    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://api.uber.com";
+    const apiBaseUrl = process.env.UBER_API_BASE_URL || "https://test-api.uber.com";
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
 
     this.http = axios.create({
@@ -141,11 +139,36 @@ export class UberIntegrationService {
       body.integrator_brand_id = payload.integrator_brand_id.trim();
     }
 
+    if (payload.merchant_store_id?.trim()) {
+      body.merchant_store_id = payload.merchant_store_id.trim();
+    }
+
     if ((payload as Record<string, unknown>).store_configuration_data != null) {
       const raw = (payload as Record<string, unknown>).store_configuration_data;
       body.store_configuration_data =
         typeof raw === "string" ? raw : JSON.stringify(raw);
     }
+
+    /**
+     * FIX: Soporte para webhooks_config
+     *
+     * Según la documentación oficial de Uber (Integration Activation & Configuration API):
+     * - webhooks_version: "1.0.0" activa los webhooks orders.failure y orders.scheduled.notification
+     * - schedule_order_webhooks.is_enabled: true activa las notificaciones de pedidos programados
+     *
+     * Sin este campo la store queda en API version 0.1 y Uber nunca envía
+     * orders.failure ni orders.scheduled.notification al webhook.
+     */
+    if (this.isObject((payload as Record<string, unknown>).webhooks_config)) {
+      body.webhooks_config = (payload as Record<string, unknown>).webhooks_config;
+    }
+
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan("DEBUG UPDATE STORE INTEGRATION"));
+    console.log(chalk.cyan("=============================================="));
+    console.log(chalk.cyan(`storeId: ${storeId}`));
+    console.log(chalk.cyan(`requestUrl: ${requestUrl}`));
+    console.log(chalk.cyan(`body: ${JSON.stringify(body, null, 2)}`));
 
     try {
       await this.http.patch(requestUrl, body, {

@@ -18,7 +18,6 @@ function sendDetailedError(
 
   if (error instanceof UberApiRequestError) {
     console.error(chalk.red(error.message));
-
     res.status(error.statusCode).json({
       ok: false,
       message: defaultMessage,
@@ -36,7 +35,6 @@ function sendDetailedError(
 
   if (error instanceof Error) {
     console.error(chalk.red(error.message));
-
     res.status(500).json({
       ok: false,
       message: defaultMessage,
@@ -74,7 +72,6 @@ function requireValidStoreId(req: Request, res: Response): string | null {
       ok: false,
       message: "Falta el storeId o el formato es inválido"
     });
-
     return null;
   }
 
@@ -86,43 +83,25 @@ function getMerchantSessionTokenFromRequest(req: Request): string | null {
 
   if (authorizationHeader?.startsWith("Bearer ")) {
     const token = authorizationHeader.replace("Bearer ", "").trim();
-
-    if (token) {
-      return token;
-    }
+    if (token) return token;
   }
 
   const merchantSessionHeader = req.header("x-merchant-session-token");
-
-  if (merchantSessionHeader?.trim()) {
-    return merchantSessionHeader.trim();
-  }
+  if (merchantSessionHeader?.trim()) return merchantSessionHeader.trim();
 
   const sessionQuery = req.query.sessionToken;
-
-  if (typeof sessionQuery === "string" && sessionQuery.trim()) {
-    return sessionQuery.trim();
-  }
+  if (typeof sessionQuery === "string" && sessionQuery.trim()) return sessionQuery.trim();
 
   return null;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 /**
  * GET /uber/stores
- *
- * Requisito Uber — Integration Config: Get stores to User
- * Documentación: https://developer.uber.com/docs/eats/references/api/store_suite#tag/GetStores/operation/getStores
- *
- * Flujo:
- * 1. El merchant inicia OAuth en /uber/auth/login con scope eats.pos_provisioning
- * 2. Uber redirige al callback con un authorization_code
- * 3. El callback intercambia el code por un access_token de usuario
- * 4. Se genera un merchantSessionToken cifrado y se devuelve al cliente
- * 5. Este endpoint recibe ese merchantSessionToken y lo usa para llamar a Uber
- *    GET /v1/eats/stores con el token del usuario (no app token)
- *
- * El token de usuario con scope eats.pos_provisioning es el único que puede
- * listar las stores autorizadas por el merchant para esta integración.
+ * Integration Config: Get stores to User
  */
 export async function getStoresToUser(req: Request, res: Response): Promise<void> {
   try {
@@ -136,68 +115,40 @@ export async function getStoresToUser(req: Request, res: Response): Promise<void
     if (!merchantSessionToken) {
       return void res.status(401).json({
         ok: false,
-        message:
-          "Falta el merchant session token. Envía Authorization: Bearer <merchantSessionToken> o x-merchant-session-token.",
+        message: "Falta el merchant session token.",
         hint: "Primero completa el OAuth en /uber/auth/login con scope eats.pos_provisioning"
       });
     }
 
     const merchantSession = readMerchantSessionToken(merchantSessionToken);
 
-    console.log(chalk.cyan(`merchantSession válida: ${merchantSession?.accessToken ? "Sí" : "No"}`));
-
     if (!merchantSession?.accessToken) {
       return void res.status(401).json({
         ok: false,
-        message:
-          "La sesión merchant es inválida o expiró. Vuelve a iniciar OAuth desde /uber/auth/login."
+        message: "La sesión merchant es inválida o expiró. Vuelve a iniciar OAuth desde /uber/auth/login."
       });
     }
 
-    const stores = await getUberActivationService().getMerchantStores(
-      merchantSession.accessToken
-    );
+    const stores = await getUberActivationService().getMerchantStores(merchantSession.accessToken);
 
     console.log(chalk.green(`✓ Stores obtenidas correctamente: ${stores.length}`));
 
-    // FIX: Uber espera ver la respuesta con las stores en el formato correcto.
-    // Devolvemos 200 con ok:true y el array de stores directamente en data.stores
-    // para que coincida con lo que Uber registra como "successful call".
     return void res.status(200).json({
       ok: true,
       message: "Tiendas obtenidas correctamente",
       data: stores
     });
   } catch (error: unknown) {
-    return sendDetailedError(
-      res,
-      "No fue posible obtener las stores autorizadas para el usuario",
-      error,
-      {
-        endpoint: "GET /uber/stores",
-        authSource:
-          req.header("authorization") != null
-            ? "Authorization"
-            : req.header("x-merchant-session-token") != null
-              ? "x-merchant-session-token"
-              : req.query.sessionToken != null
-                ? "query.sessionToken"
-                : null
-      }
-    );
+    return sendDetailedError(res, "No fue posible obtener las stores autorizadas para el usuario", error, {
+      endpoint: "GET /uber/stores"
+    });
   }
 }
 
-export async function getMerchantStoreIntegrationDetails(
-  req: Request,
-  res: Response
-): Promise<void> {
+export async function getMerchantStoreIntegrationDetails(req: Request, res: Response): Promise<void> {
   try {
     const storeId = requireValidStoreId(req, res);
-
-    if (!storeId) {
-      return;
-    }
+    if (!storeId) return;
 
     const result = await getUberIntegrationService().getStoreIntegrationDetails(storeId);
 
@@ -207,87 +158,87 @@ export async function getMerchantStoreIntegrationDetails(
       data: result
     });
   } catch (error: unknown) {
-    return sendDetailedError(
-      res,
-      "No fue posible obtener el detalle de integración de la store",
-      error,
-      {
-        storeId: req.params.storeId ?? null
-      }
-    );
+    return sendDetailedError(res, "No fue posible obtener el detalle de integración de la store", error, {
+      storeId: req.params.storeId ?? null
+    });
   }
 }
 
-export async function updateMerchantStoreIntegration(
-  req: Request,
-  res: Response
-): Promise<void> {
+/**
+ * PUT /uber/stores/:storeId/integration
+ *
+ * Actualiza la configuración de integración de una store.
+ *
+ * FIX: Ahora acepta webhooks_config en el body para poder actualizar
+ * la versión de webhooks a 1.0.0, lo que activa los eventos
+ * orders.failure y orders.scheduled.notification requeridos por Uber.
+ *
+ * Ejemplo de body para activar webhooks versión 1.0.0:
+ * {
+ *   "webhooks_config": {
+ *     "webhooks_version": "1.0.0",
+ *     "schedule_order_webhooks": { "is_enabled": true }
+ *   }
+ * }
+ */
+export async function updateMerchantStoreIntegration(req: Request, res: Response): Promise<void> {
   try {
     const storeId = requireValidStoreId(req, res);
+    if (!storeId) return;
 
-    if (!storeId) {
-      return;
-    }
-
-    const body = req.body as Partial<UberUpdateStoreIntegrationRequest> | undefined;
+    const body = req.body as Record<string, unknown> | undefined;
 
     const payload: UberUpdateStoreIntegrationRequest = {
       is_order_manager:
-        typeof body?.is_order_manager === "boolean"
-          ? body.is_order_manager
-          : undefined,
+        typeof body?.is_order_manager === "boolean" ? body.is_order_manager : undefined,
       integrator_store_id:
-        body?.integrator_store_id ??
-        process.env.UBER_DEFAULT_INTEGRATOR_STORE_ID ??
-        undefined,
+        typeof body?.integrator_store_id === "string"
+          ? body.integrator_store_id
+          : process.env.UBER_DEFAULT_INTEGRATOR_STORE_ID ?? undefined,
       integrator_brand_id:
-        body?.integrator_brand_id ??
-        process.env.UBER_DEFAULT_INTEGRATOR_BRAND_ID ??
-        undefined,
+        typeof body?.integrator_brand_id === "string"
+          ? body.integrator_brand_id
+          : process.env.UBER_DEFAULT_INTEGRATOR_BRAND_ID ?? undefined,
       merchant_store_id:
-        body?.merchant_store_id ??
-        process.env.UBER_DEFAULT_MERCHANT_STORE_ID ??
-        undefined
+        typeof body?.merchant_store_id === "string"
+          ? body.merchant_store_id
+          : process.env.UBER_DEFAULT_MERCHANT_STORE_ID ?? undefined
     };
 
-    const result = await getUberIntegrationService().updateStoreIntegration(
-      storeId,
-      payload
-    );
+    // FIX: Pasar webhooks_config directamente si viene en el body
+    if (isPlainObject(body?.webhooks_config)) {
+      (payload as Record<string, unknown>).webhooks_config = body.webhooks_config;
+    }
+
+    // Pasar integration_enabled si viene en el body
+    if (typeof body?.integration_enabled === "boolean") {
+      (payload as Record<string, unknown>).integration_enabled = body.integration_enabled;
+    }
+
+    // Pasar store_configuration_data si viene en el body
+    if (body?.store_configuration_data != null) {
+      (payload as Record<string, unknown>).store_configuration_data = body.store_configuration_data;
+    }
+
+    await getUberIntegrationService().updateStoreIntegration(storeId, payload);
 
     return void res.status(200).json({
       ok: true,
       message: "Integración de la store actualizada correctamente",
-      data: result
+      data: { storeId, payload }
     });
   } catch (error: unknown) {
-    return sendDetailedError(
-      res,
-      "No fue posible actualizar la integración de la store",
-      error,
-      {
-        storeId: req.params.storeId ?? null,
-        requestBody: {
-          is_order_manager: req.body?.is_order_manager ?? null,
-          integrator_store_id: req.body?.integrator_store_id ?? null,
-          integrator_brand_id: req.body?.integrator_brand_id ?? null,
-          merchant_store_id: req.body?.merchant_store_id ?? null
-        }
-      }
-    );
+    return sendDetailedError(res, "No fue posible actualizar la integración de la store", error, {
+      storeId: req.params.storeId ?? null,
+      requestBody: req.body ?? null
+    });
   }
 }
 
-export async function removeMerchantStoreIntegration(
-  req: Request,
-  res: Response
-): Promise<void> {
+export async function removeMerchantStoreIntegration(req: Request, res: Response): Promise<void> {
   try {
     const storeId = requireValidStoreId(req, res);
-
-    if (!storeId) {
-      return;
-    }
+    if (!storeId) return;
 
     const result = await getUberIntegrationService().removeStoreIntegration(storeId);
 
@@ -297,13 +248,8 @@ export async function removeMerchantStoreIntegration(
       data: result
     });
   } catch (error: unknown) {
-    return sendDetailedError(
-      res,
-      "No fue posible remover la integración de la store",
-      error,
-      {
-        storeId: req.params.storeId ?? null
-      }
-    );
+    return sendDetailedError(res, "No fue posible remover la integración de la store", error, {
+      storeId: req.params.storeId ?? null
+    });
   }
 }
